@@ -1,0 +1,19 @@
+<h2>Interface Faults</h2>
+{% if snapshot %}
+<table class="jweb-table">
+  <thead><tr><th>Interface</th><th>Admin</th><th>Link</th><th>Mode</th><th>Description</th></tr></thead>
+  <tbody>
+  {% for iface in interfaces_list %}
+  {% if iface.link == "down" or iface.admin == "disabled" %}
+  <tr>
+    <td><strong>{{ iface.name }}</strong></td>
+    <td><span class="status-badge {% if iface.admin == 'up' %}status-up{% elif iface.admin == 'disabled' %}status-disabled{% else %}status-down{% endif %}">{{ iface.admin }}</span></td>
+    <td><span class="status-badge status-down">{{ iface.link }}</span></td>
+    <td>{{ iface.mode|default:"&mdash;" }}</td>
+    <td class="muted">{{ iface.description|default:"&mdash;" }}</td>
+  </tr>
+  {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

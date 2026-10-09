@@ -1,0 +1,1079 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{{ device.name }} – J-Web{% endblock %}
+{% block full_page %}
+<div class="jweb-shell">
+
+  <aside class="jweb-sidebar">
+    <div class="jweb-device-name">{{ device.name }}</div>
+    <div class="jweb-device-ip">{{ device.management_ip }}</div>
+    <label class="switch-picker sidebar-switch-picker" for="device-switcher">
+      <select id="device-switcher" onchange="if (this.value) window.location.href = this.value;">
+        {% for switch in devices %}
+        <option value="{% url 'devices:detail' switch.pk %}?tab={{ tab }}&section={{ section }}" {% if switch.pk == device.pk %}selected{% endif %}>
+          {{ switch.name }} ({{ switch.management_ip }})
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    {% if perms.devices.add_switchdevice or perms.devices.change_switchdevice or perms.devices.delete_switchdevice %}
+    <div class="sidebar-switch-tools">
+      <button class="sidebar-action-btn" type="button" onclick="openSwitchModal()">Switches...</button>
+    </div>
+    {% endif %}
+    <div class="jweb-device-meta" id="sidebar-meta">
+      {% if snapshot %}
+        <span>v{{ snapshot.config_version }}</span>
+        <span>Synced: {{ snapshot.synced_at|date:"Y-m-d H:i" }}</span>
+      {% else %}
+        <span class="badge-warn">Not synced</span>
+      {% endif %}
+      {% if pending_changes %}<span class="badge-pending">{{ pending_changes|length }} pending</span>{% endif %}
+    </div>
+    <div class="jweb-sidebar-actions">
+      <button id="sync-btn" class="sidebar-action-btn" onclick="startSync(event)">&#8635; Sync Cache</button>
+      <div id="sync-spinner" style="display:none" class="sync-spinner">&#8987; Syncing&hellip;</div>
+      {% if pending_changes %}
+      <button class="sidebar-action-btn sidebar-action-view" type="button" onclick="togglePendingPanel()">&#128196; View Changes ({{ pending_changes|length }})</button>
+      <form method="post" action="{% url 'devices:commit_staged' device.pk %}">{% csrf_token %}
+        <button class="sidebar-action-btn sidebar-action-commit" type="submit">&#10003; Commit ({{ pending_changes|length }})</button>
+      </form>
+      <form method="post" action="{% url 'devices:discard_staged' device.pk %}">{% csrf_token %}
+        <button class="sidebar-action-btn sidebar-action-danger" type="submit"
+          onclick="return confirm('Discard all staged changes?')">&#10005; Discard</button>
+      </form>
+      {% endif %}
+    </div>
+
+    {% for tab_key, sections in nav.items %}
+    <div class="sidenav-group {% if tab == tab_key %}active{% endif %}">
+      <div class="sidenav-tab">
+        <a href="{% url 'devices:detail' device.pk %}?tab={{ tab_key }}">{{ tab_key|title }}</a>
+      </div>
+      {% if tab == tab_key %}
+      <ul class="sidenav-list">
+        {% for sec_key, sec_label in sections %}
+        <li class="{% if section == sec_key %}active{% endif %}">
+          <a href="{% url 'devices:detail' device.pk %}?tab={{ tab_key }}&section={{ sec_key }}">{{ sec_label }}</a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    <div class="jweb-sidebar-footer">
+      {% if perms.auth.view_user %}<a href="/accounts/users/">Users</a>{% endif %}
+      <a href="/accounts/logout/">Logout {{ request.user.username }}</a>
+    </div>
+  </aside>
+
+  <main class="jweb-main">
+    {% for msg in messages %}
+    <div class="alert alert-{{ msg.tags }}">{{ msg }}</div>
+    {% endfor %}
+
+    <div id="sync-flash" class="alert alert-info" style="display:none"></div>
+
+    {% if pending_changes %}
+    <div id="pending-panel" class="pending-panel" style="display:none">
+      <div class="pending-panel-header">
+        <strong>Staged Changes ({{ pending_changes|length }})</strong>
+        <button class="pending-panel-close" onclick="togglePendingPanel()" title="Close">&times;</button>
+      </div>
+      <pre class="code-pre pending-panel-diff">{{ compare_text }}</pre>
+      <div class="pending-panel-actions">
+        <form method="post" action="{% url 'devices:commit_staged' device.pk %}" style="display:inline">{% csrf_token %}
+          <button class="button">&#10003; Commit All</button>
+        </form>
+        <form method="post" action="{% url 'devices:discard_staged' device.pk %}" style="display:inline">{% csrf_token %}
+          <button class="button button-danger" onclick="return confirm('Discard all staged changes?')">&#10005; Discard All</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    {% include section_template %}
+
+    {% if jobs %}
+    <div class="recent-jobs">
+      <h4 class="muted" style="margin-top:2rem">Recent Jobs</h4>
+      {% for job in jobs|slice:":5" %}
+      <div class="job-card status-{{ job.status }}">
+        <strong>{{ job.action }}</strong>
+        <span class="muted">{{ job.created_at|date:"H:i d M" }}</span>
+        <span class="job-status {{ job.status }}">{{ job.status }}</span>
+        {% if job.output %}<pre class="job-output">{{ job.output|truncatechars:300 }}</pre>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+  </main>
+</div>
+
+{% if perms.devices.add_switchdevice or perms.devices.change_switchdevice or perms.devices.delete_switchdevice %}
+<div id="switch-modal" class="vlan-modal-overlay" style="display:{% if switch_modal_open %}flex{% else %}none{% endif %}" onclick="handleSwitchOverlayClick(event)">
+  <div class="vlan-modal-box switch-modal-box">
+    <div class="vlan-modal-header">
+      <span>Switches</span>
+      <button class="vlan-modal-close" type="button" onclick="closeSwitchModal()" title="Close">&times;</button>
+    </div>
+    <div class="vlan-tabs">
+      {% if perms.devices.add_switchdevice %}<button class="vlan-tab-btn {% if switch_modal_tab == 'add' %}active{% endif %}" type="button" data-switch-tab="add" onclick="showSwitchTab('add')">Add</button>{% endif %}
+      {% if perms.devices.change_switchdevice %}<button class="vlan-tab-btn {% if switch_modal_tab == 'edit' %}active{% endif %}" type="button" data-switch-tab="edit" onclick="showSwitchTab('edit')">Edit</button>{% endif %}
+      {% if perms.devices.delete_switchdevice %}<button class="vlan-tab-btn {% if switch_modal_tab == 'delete' %}active{% endif %}" type="button" data-switch-tab="delete" onclick="showSwitchTab('delete')">Delete</button>{% endif %}
+    </div>
+
+    {% if perms.devices.add_switchdevice %}
+    <div class="vlan-tab-content switch-tab-content {% if switch_modal_tab == 'add' %}active{% endif %}" data-switch-panel="add">
+      <form method="post" action="{% url 'devices:create_modal' %}">
+        {% csrf_token %}
+        <div class="form-grid-2col switch-form-grid">{{ switch_add_form.as_p }}</div>
+        <div class="vlan-modal-footer">
+          <button type="button" class="button button-secondary" onclick="closeSwitchModal()">Cancel</button>
+          <button type="submit" class="button">Add Switch</button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if perms.devices.change_switchdevice %}
+    <div class="vlan-tab-content switch-tab-content {% if switch_modal_tab == 'edit' %}active{% endif %}" data-switch-panel="edit">
+      <form method="post" action="{% url 'devices:update_modal' device.pk %}">
+        {% csrf_token %}
+        <div class="form-grid-2col switch-form-grid">{{ switch_edit_form.as_p }}</div>
+        <div class="vlan-modal-footer">
+          <button type="button" class="button button-secondary" onclick="closeSwitchModal()">Cancel</button>
+          <button type="submit" class="button">Save Switch</button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if perms.devices.delete_switchdevice %}
+    <div class="vlan-tab-content switch-tab-content {% if switch_modal_tab == 'delete' %}active{% endif %}" data-switch-panel="delete">
+      <form method="post" action="{% url 'devices:delete_modal' device.pk %}" onsubmit="return confirm('Delete {{ device.name }}? This cannot be undone.')">
+        {% csrf_token %}
+        <p class="muted">Delete the current switch: <strong>{{ device.name }}</strong> ({{ device.management_ip }}).</p>
+        <div class="vlan-modal-footer">
+          <button type="button" class="button button-secondary" onclick="closeSwitchModal()">Cancel</button>
+          <button type="submit" class="button button-danger">Delete Switch</button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if perms.devices.manage_gemini_api_key %}
+<div id="gemini-key-modal" class="vlan-modal-overlay" style="display:none" onclick="handleGeminiKeyOverlayClick(event)">
+  <div class="vlan-modal-box switch-modal-box">
+    <div class="vlan-modal-header">
+      <span>Gemini API Key</span>
+      <button class="vlan-modal-close" type="button" onclick="closeGeminiKeyModal()" title="Close">&times;</button>
+    </div>
+    <div class="vlan-tab-content switch-tab-content active">
+      <p class="muted" id="gemini-key-status">Current key: {% if gemini_key_status.has_key %}{{ gemini_key_status.masked_key }} ({{ gemini_key_status.source }}){% else %}not configured{% endif %}</p>
+      <div class="form-grid-2col switch-form-grid">
+        <label for="gemini-api-key-input">API key</label>
+        <input type="password" id="gemini-api-key-input" autocomplete="off" placeholder="Paste Gemini API key">
+      </div>
+      <div class="vlan-modal-footer">
+        <button type="button" class="button button-secondary" onclick="closeGeminiKeyModal()">Cancel</button>
+        <button type="button" class="button button-secondary" onclick="deleteGeminiApiKey()">Remove Saved Key</button>
+        <button type="button" class="button" onclick="saveGeminiApiKey()">Save Key</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+<script>
+(function () {
+  var SYNC_URL  = "{% url 'devices:sync_cache' device.pk %}";
+  var STATUS_URL = "{% url 'devices:sync_status' device.pk %}";
+  {% if perms.devices.manage_port_layout %}
+  var PORT_LAYOUT_URL = "{% url 'devices:save_port_layout' device.pk %}";
+  var GEMINI_PORT_LAYOUT_URL = "{% url 'devices:gemini_detect_port_layout' device.pk %}";
+  {% else %}
+  var PORT_LAYOUT_URL = "";
+  var GEMINI_PORT_LAYOUT_URL = "";
+  {% endif %}
+  {% if perms.devices.manage_gemini_api_key %}
+  var GEMINI_KEY_URL = "{% url 'devices:gemini_api_key' device.pk %}";
+  {% else %}
+  var GEMINI_KEY_URL = "";
+  {% endif %}
+  {% if device.snmp_enabled and perms.devices.view_live_snmp_status %}
+  var LIVE_SNMP_URL = "{% url 'devices:live_interface_status' device.pk %}";
+  {% else %}
+  var LIVE_SNMP_URL = "";
+  {% endif %}
+  var CSRF_TOKEN = "{{ csrf_token }}";
+
+  var pollTimer = null;
+  var knownSyncedAt = "{{ snapshot.synced_at.isoformat|default:'' }}";
+  var detectedPortCandidates = [];
+  var portTargetAssignments = new Map();
+  var HAS_SAVED_PORT_MAP = {% if has_port_map %}true{% else %}false{% endif %};
+
+  function setSyncing(active) {
+    document.getElementById('sync-btn').style.display    = active ? 'none'  : '';
+    document.getElementById('sync-spinner').style.display = active ? ''     : 'none';
+  }
+
+  function showFlash(msg, type) {
+    var el = document.getElementById('sync-flash');
+    el.textContent = msg;
+    el.className = 'alert alert-' + (type || 'info');
+    el.style.display = '';
+    setTimeout(function () { el.style.display = 'none'; }, 6000);
+  }
+
+  function poll() {
+    fetch(STATUS_URL, {headers: {'Accept': 'application/json'}})
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var state = data.task_state;
+        if (state === 'SUCCESS' || state === 'FAILURE' || state === 'UNKNOWN') {
+          clearInterval(pollTimer);
+          setSyncing(false);
+          if (state === 'FAILURE') {
+            showFlash('Sync failed. Check server logs.', 'error');
+          } else if (data.synced_at && data.synced_at !== knownSyncedAt) {
+            // Config actually changed — reload page to pick up new snapshot data
+            showFlash('Sync complete — refreshing page…', 'info');
+            setTimeout(function () { location.reload(); }, 1200);
+          } else {
+            showFlash('Sync complete — no changes detected.', 'info');
+          }
+        }
+      })
+      .catch(function () {
+        /* network error – keep polling */
+      });
+  }
+
+  window.startSync = function (e) {
+    e.preventDefault();
+    setSyncing(true);
+    fetch(SYNC_URL, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': CSRF_TOKEN,
+        'Accept': 'application/json',
+      },
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.task_id) {
+          pollTimer = setInterval(poll, 3000);
+        } else {
+          setSyncing(false);
+          showFlash('Sync failed to start.', 'error');
+        }
+      })
+      .catch(function () {
+        setSyncing(false);
+        showFlash('Could not contact server.', 'error');
+      });
+  };
+
+  // If a sync was already in progress when the page loaded, resume polling
+  fetch(STATUS_URL, {headers: {'Accept': 'application/json'}})
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.task_state === 'STARTED' || data.task_state === 'PENDING') {
+        setSyncing(true);
+        pollTimer = setInterval(poll, 3000);
+      }
+    })
+    .catch(function () {});
+
+  var lastCounters = {};
+  var liveSnmpTimer = null;
+  var liveSnmpFailures = 0;
+
+  function trafficClass(delta) {
+    if (!delta || delta <= 0) return 'traffic-idle';
+    if (delta > 1000000) return 'traffic-high';
+    if (delta > 64000) return 'traffic-medium';
+    return 'traffic-low';
+  }
+
+  function findPort(name) {
+    var ports = document.querySelectorAll('[data-port-name]');
+    for (var i = 0; i < ports.length; i++) {
+      if (ports[i].getAttribute('data-port-name') === name) return ports[i];
+    }
+    return null;
+  }
+
+  function applyLiveInterfaceStatus(data) {
+    if (!data || !data.interfaces) return;
+    data.interfaces.forEach(function (iface) {
+      var port = findPort(iface.name);
+      if (!port) return;
+
+      port.classList.remove('port-up', 'port-down', 'port-disabled', 'port-unknown');
+      port.classList.add('port-snmp-live');
+      if (iface.admin === 'down') {
+        port.classList.add('port-disabled');
+      } else if (iface.link === 'up') {
+        port.classList.add('port-up');
+      } else if (iface.link === 'down') {
+        port.classList.add('port-down');
+      } else {
+        port.classList.add('port-unknown');
+      }
+
+      var led = port.querySelector('.port-traffic-led');
+      if (led) {
+        var previous = lastCounters[iface.name];
+        var current = iface.total_octets;
+        var delta = previous && current !== null ? current - previous : 0;
+        led.className = 'port-traffic-led ' + trafficClass(delta);
+        led.setAttribute('title', current === null ? 'SNMP traffic counters unavailable' : 'SNMP traffic: ' + delta + ' octets since last poll');
+        if (current !== null) lastCounters[iface.name] = current;
+      }
+
+      port.title = iface.name + ' | admin=' + iface.admin + ' | link=' + iface.link;
+    });
+  }
+
+  function pollLiveInterfaces() {
+    if (!LIVE_SNMP_URL) return;
+    fetch(LIVE_SNMP_URL, {headers: {'Accept': 'application/json'}})
+      .then(function (r) {
+        return r.json().then(function (data) {
+          if (!r.ok) throw data;
+          return data;
+        });
+      })
+      .then(function (data) {
+        liveSnmpFailures = 0;
+        applyLiveInterfaceStatus(data);
+        scheduleLiveInterfacePoll(5000);
+      })
+      .catch(function (error) {
+        liveSnmpFailures += 1;
+        if (liveSnmpFailures === 1) showFlash(error && error.error ? error.error : 'Live SNMP status unavailable.', 'warning');
+        scheduleLiveInterfacePoll(Math.min(60000, 5000 * Math.pow(2, Math.min(liveSnmpFailures - 1, 4))));
+      });
+  }
+
+  function scheduleLiveInterfacePoll(delay) {
+    if (!LIVE_SNMP_URL) return;
+    if (liveSnmpTimer) clearTimeout(liveSnmpTimer);
+    liveSnmpTimer = setTimeout(pollLiveInterfaces, delay);
+  }
+
+  if (LIVE_SNMP_URL) {
+    pollLiveInterfaces();
+  }
+
+  function getPercentRect(port, container) {
+    var rect = port.getBoundingClientRect();
+    var parent = container.getBoundingClientRect();
+    return {
+      left: ((rect.left - parent.left) / parent.width) * 100,
+      top: ((rect.top - parent.top) / parent.height) * 100,
+      width: (rect.width / parent.width) * 100,
+      height: (rect.height / parent.height) * 100,
+    };
+  }
+
+  function setPortRect(port, rect) {
+    port.style.left = rect.left.toFixed(3) + '%';
+    port.style.top = rect.top.toFixed(3) + '%';
+    port.style.width = rect.width.toFixed(3) + '%';
+    port.style.height = rect.height.toFixed(3) + '%';
+  }
+
+  function clampRect(rect) {
+    rect.width = Math.max(0.2, Math.min(25, rect.width));
+    rect.height = Math.max(0.2, Math.min(25, rect.height));
+    rect.left = Math.max(0, Math.min(100 - rect.width, rect.left));
+    rect.top = Math.max(0, Math.min(100 - rect.height, rect.top));
+    return rect;
+  }
+
+  function getFaceplateDetectionContext() {
+    var container = document.querySelector('.port-diagram');
+    var image = document.querySelector('.switch-faceplate-img');
+    if (!container || !image || !image.complete || !image.naturalWidth) return null;
+    var canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    var context = canvas.getContext('2d', {willReadFrequently: true});
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return {container: container, image: image, canvas: canvas, context: context};
+  }
+
+  function clearDetectedPortOutlines() {
+    document.querySelectorAll('.detected-port-outline').forEach(function (outline) {
+      outline.remove();
+    });
+  }
+
+  function addDetectedPortOutline(container, rect) {
+    var outline = document.createElement('span');
+    outline.className = 'detected-port-outline' + (arguments[2] ? ' detected-port-outline-fallback' : '');
+    outline.style.left = rect.left.toFixed(3) + '%';
+    outline.style.top = rect.top.toFixed(3) + '%';
+    outline.style.width = rect.width.toFixed(3) + '%';
+    outline.style.height = rect.height.toFixed(3) + '%';
+    container.appendChild(outline);
+  }
+
+  function getDefaultPortRect(port) {
+    return clampRect({
+      left: parseFloat(port.getAttribute('data-default-left')) || 0,
+      top: parseFloat(port.getAttribute('data-default-top')) || 0,
+      width: parseFloat(port.getAttribute('data-default-width')) || 1,
+      height: parseFloat(port.getAttribute('data-default-height')) || 1,
+    });
+  }
+
+  function buildPortCandidates(detection) {
+    var matched = 0;
+    var candidates = [];
+    document.querySelectorAll('[data-port-name]').forEach(function (port) {
+      var container = document.querySelector('.port-diagram');
+      var target = HAS_SAVED_PORT_MAP ? getPercentRect(port, container) : getDefaultPortRect(port);
+      var detected = detection ? detectJackRectNear(port, detection.container, detection.image, detection.canvas, detection.context, target) : null;
+      if (detected) {
+        target = detected;
+        matched += 1;
+      }
+      candidates.push({rect: target, matched: !!detected, inverted: port.classList.contains('port-inverted')});
+    });
+    return {candidates: candidates, matched: matched};
+  }
+
+  function nearestCandidate(rect, candidates, used) {
+    var centerX = rect.left + rect.width / 2;
+    var centerY = rect.top + rect.height / 2;
+    var nearest = null;
+    candidates.forEach(function (candidate, index) {
+      if (used && used.has(index)) return;
+      var candidateRect = candidate.rect || candidate;
+      var candidateCenterX = candidateRect.left + candidateRect.width / 2;
+      var candidateCenterY = candidateRect.top + candidateRect.height / 2;
+      var distance = Math.hypot(candidateCenterX - centerX, candidateCenterY - centerY);
+      if (!nearest || distance < nearest.distance) nearest = {index: index, rect: candidateRect, distance: distance};
+    });
+    return nearest;
+  }
+
+  function candidateIsUnderRect(rect, candidateRect) {
+    var overlapWidth = Math.max(0, Math.min(rect.left + rect.width, candidateRect.left + candidateRect.width) - Math.max(rect.left, candidateRect.left));
+    var overlapHeight = Math.max(0, Math.min(rect.top + rect.height, candidateRect.top + candidateRect.height) - Math.max(rect.top, candidateRect.top));
+    var overlapArea = overlapWidth * overlapHeight;
+    var candidateArea = candidateRect.width * candidateRect.height;
+    var centerX = rect.left + rect.width / 2;
+    var centerY = rect.top + rect.height / 2;
+    var centerInside = centerX >= candidateRect.left && centerX <= candidateRect.left + candidateRect.width
+      && centerY >= candidateRect.top && centerY <= candidateRect.top + candidateRect.height;
+    return centerInside || (candidateArea > 0 && overlapArea / candidateArea >= 0.35);
+  }
+
+  function rectsTouch(first, second, padding) {
+    var gap = padding || 0;
+    return !(first.left + first.width + gap <= second.left
+      || second.left + second.width + gap <= first.left
+      || first.top + first.height + gap <= second.top
+      || second.top + second.height + gap <= first.top);
+  }
+
+  function applyPortOrientation(port, candidate) {
+    if (!candidate) return;
+    port.classList.toggle('port-inverted', !!candidate.inverted);
+  }
+
+  function movePortToFreeSpace(port, container) {
+    var original = getPercentRect(port, container);
+    var blockers = [];
+    document.querySelectorAll('[data-port-name]').forEach(function (other) {
+      if (other !== port) blockers.push(getPercentRect(other, container));
+    });
+    detectedPortCandidates.forEach(function (candidate) {
+      blockers.push(candidate.rect || candidate);
+    });
+    for (var top = 1; top <= 100 - original.height; top += 1) {
+      for (var left = 1; left <= 100 - original.width; left += 1) {
+        var freeRect = {left: left, top: top, width: original.width, height: original.height};
+        if (!blockers.some(function (blocker) { return rectsTouch(freeRect, blocker, 0.25); })) {
+          setPortRect(port, freeRect);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function findTargetOccupant(targetPort, targetRect, container) {
+    var occupant = null;
+    var closestDistance = Infinity;
+    document.querySelectorAll('[data-port-name]').forEach(function (other) {
+      if (other === targetPort) return;
+      var otherRect = getPercentRect(other, container);
+      if (!rectsTouch(otherRect, targetRect, 0.15)) return;
+      var distance = Math.hypot(
+        (otherRect.left + otherRect.width / 2) - (targetRect.left + targetRect.width / 2),
+        (otherRect.top + otherRect.height / 2) - (targetRect.top + targetRect.height / 2)
+      );
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        occupant = other;
+      }
+    });
+    return occupant;
+  }
+
+  function findSnappedCandidate(rect) {
+    var eligible = detectedPortCandidates.filter(function (candidate) {
+      var candidateRect = candidate.rect || candidate;
+      return candidateIsUnderRect(rect, candidateRect)
+        && rect.width >= candidateRect.width * 0.55
+        && rect.width <= candidateRect.width * 1.8
+        && rect.height >= candidateRect.height * 0.55
+        && rect.height <= candidateRect.height * 1.8;
+    });
+    return nearestCandidate(rect, eligible);
+  }
+
+  function setDetectedPortCandidatesFromRects(rects, matched) {
+    var container = document.querySelector('.port-diagram');
+    detectedPortCandidates = (rects || []).map(function (rect) {
+      return {rect: clampRect(rect), matched: matched};
+    });
+    portTargetAssignments.clear();
+    clearDetectedPortOutlines();
+    if (container) detectedPortCandidates.forEach(function (candidate) {
+      addDetectedPortOutline(container, candidate.rect, !candidate.matched);
+    });
+
+    var used = new Set();
+    document.querySelectorAll('[data-port-name]').forEach(function (port) {
+      var detected = nearestCandidate(getDefaultPortRect(port), detectedPortCandidates, used);
+      if (!detected) return;
+      setPortRect(port, detected.rect);
+      detectedPortCandidates[detected.index].inverted = port.classList.contains('port-inverted');
+      applyPortOrientation(port, detectedPortCandidates[detected.index]);
+      portTargetAssignments.set(port, detected.index);
+      used.add(detected.index);
+    });
+  }
+
+  function snapPortToDetectedShape(port, sourceRect) {
+    var container = document.querySelector('.port-diagram');
+    if (!container || !detectedPortCandidates.length) return false;
+    var rect = getPercentRect(port, container);
+    var eligible = detectedPortCandidates.filter(function (candidate) {
+      return candidateIsUnderRect(rect, candidate.rect || candidate);
+    });
+    var detected = nearestCandidate(rect, eligible);
+    if (!detected) return false;
+    var targetCandidate = eligible[detected.index];
+    var targetIndex = detectedPortCandidates.indexOf(targetCandidate);
+    var sourceCandidate = findSnappedCandidate(sourceRect || rect);
+    var occupant = findTargetOccupant(port, detected.rect, container);
+    if (occupant) {
+      if (sourceCandidate) {
+        var sourceTarget = detectedPortCandidates.find(function (candidate) {
+          return candidate.rect === sourceCandidate.rect;
+        });
+        setPortRect(occupant, rect);
+        applyPortOrientation(occupant, sourceTarget);
+        portTargetAssignments.set(occupant, detectedPortCandidates.indexOf(sourceTarget));
+      } else if (!movePortToFreeSpace(occupant, container)) {
+        portTargetAssignments.delete(occupant);
+        return false;
+      }
+    }
+    setPortRect(port, detected.rect);
+    applyPortOrientation(port, targetCandidate);
+    portTargetAssignments.set(port, targetIndex);
+    return true;
+  }
+
+  function enablePortDrag(port, container) {
+    port.addEventListener('contextmenu', function (event) {
+      if (!document.body.classList.contains('port-map-editing')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      port.classList.toggle('port-inverted');
+    });
+    port.addEventListener('pointerdown', function (event) {
+      if (!document.body.classList.contains('port-map-editing')) return;
+      if (event.button !== 0) return;
+      event.preventDefault();
+      port.setPointerCapture(event.pointerId);
+      var start = getPercentRect(port, container);
+      var parent = container.getBoundingClientRect();
+      var portRect = port.getBoundingClientRect();
+      var resizeZone = Math.max(12, Math.min(portRect.width, portRect.height) * 0.45);
+      var resizing = event.target.classList.contains('port-resize-handle') || (
+        event.clientX >= portRect.right - resizeZone && event.clientY >= portRect.bottom - resizeZone
+      );
+      var startX = event.clientX;
+      var startY = event.clientY;
+
+      function move(moveEvent) {
+        var dx = ((moveEvent.clientX - startX) / parent.width) * 100;
+        var dy = ((moveEvent.clientY - startY) / parent.height) * 100;
+        var next = resizing
+          ? {left: start.left, top: start.top, width: start.width + dx, height: start.height + dy}
+          : {left: start.left + dx, top: start.top + dy, width: start.width, height: start.height};
+        setPortRect(port, clampRect(next));
+      }
+
+      function up(upEvent) {
+        port.releasePointerCapture(upEvent.pointerId);
+        port.removeEventListener('pointermove', move);
+        port.removeEventListener('pointerup', up);
+        port.removeEventListener('pointercancel', up);
+        if (!resizing && !snapPortToDetectedShape(port, start)) portTargetAssignments.delete(port);
+      }
+
+      port.addEventListener('pointermove', move);
+      port.addEventListener('pointerup', up);
+      port.addEventListener('pointercancel', up);
+    });
+  }
+
+  function enablePortGridDrag(handle, container) {
+    handle.addEventListener('pointerdown', function (event) {
+      if (!document.body.classList.contains('port-map-editing') || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      handle.setPointerCapture(event.pointerId);
+      var ports = Array.from(container.querySelectorAll('[data-port-name]'));
+      var startRects = ports.map(function (port) { return getPercentRect(port, container); });
+      var outlineElements = Array.from(container.querySelectorAll('.detected-port-outline'));
+      var startTargetRects = detectedPortCandidates.map(function (candidate) { return candidate.rect; });
+      var parent = container.getBoundingClientRect();
+      var startX = event.clientX;
+      var startY = event.clientY;
+
+      function move(moveEvent) {
+        var dx = ((moveEvent.clientX - startX) / parent.width) * 100;
+        var dy = ((moveEvent.clientY - startY) / parent.height) * 100;
+        var minLeft = Math.min.apply(null, startRects.map(function (rect) { return rect.left; }));
+        var minTop = Math.min.apply(null, startRects.map(function (rect) { return rect.top; }));
+        var maxRight = Math.max.apply(null, startRects.map(function (rect) { return rect.left + rect.width; }));
+        var maxBottom = Math.max.apply(null, startRects.map(function (rect) { return rect.top + rect.height; }));
+        dx = Math.max(-minLeft, Math.min(100 - maxRight, dx));
+        dy = Math.max(-minTop, Math.min(100 - maxBottom, dy));
+        detectedPortCandidates.forEach(function (candidate, index) {
+          var targetRect = startTargetRects[index];
+          candidate.rect = {left: targetRect.left + dx, top: targetRect.top + dy, width: targetRect.width, height: targetRect.height};
+          var outline = outlineElements[index];
+          if (outline) {
+            outline.style.left = candidate.rect.left.toFixed(3) + '%';
+            outline.style.top = candidate.rect.top.toFixed(3) + '%';
+          }
+        });
+        ports.forEach(function (port, index) {
+          if (!portTargetAssignments.has(port)) return;
+          var rect = startRects[index];
+          setPortRect(port, {left: rect.left + dx, top: rect.top + dy, width: rect.width, height: rect.height});
+        });
+      }
+
+      function up(upEvent) {
+        handle.releasePointerCapture(upEvent.pointerId);
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', up);
+        handle.removeEventListener('pointercancel', up);
+      }
+
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', up);
+      handle.addEventListener('pointercancel', up);
+    });
+  }
+
+  function darkPixel(data, offset) {
+    var red = data[offset];
+    var green = data[offset + 1];
+    var blue = data[offset + 2];
+    return data[offset + 3] > 20 && ((red + green + blue) / 3) < 125 && Math.max(red, green, blue) - Math.min(red, green, blue) < 85;
+  }
+
+  function shrinkDetectedRect(rect) {
+    var insetX = Math.min(0.35, rect.width * 0.12);
+    var insetY = Math.min(0.35, rect.height * 0.12);
+    return clampRect({
+      left: rect.left + insetX,
+      top: rect.top + insetY,
+      width: rect.width - insetX * 2,
+      height: rect.height - insetY * 2,
+    });
+  }
+
+  function plausibleDetectedRect(detected, seedRect) {
+    return detected.width >= seedRect.width * 0.45
+      && detected.width <= seedRect.width * 1.6
+      && detected.height >= seedRect.height * 0.45
+      && detected.height <= seedRect.height * 1.6;
+  }
+
+  function detectJackRectNear(port, container, image, canvas, context, seedRect) {
+    var rect = seedRect || getPercentRect(port, container);
+    var imageWidth = canvas.width;
+    var imageHeight = canvas.height;
+    var centerX = ((rect.left + rect.width / 2) / 100) * imageWidth;
+    var centerY = ((rect.top + rect.height / 2) / 100) * imageHeight;
+    var searchWidth = Math.max((rect.width / 100) * imageWidth * 3.3, imageWidth * 0.055);
+    var searchHeight = Math.max((rect.height / 100) * imageHeight * 3.0, imageHeight * 0.085);
+    var left = Math.max(0, Math.floor(centerX - searchWidth / 2));
+    var top = Math.max(0, Math.floor(centerY - searchHeight / 2));
+    var right = Math.min(imageWidth, Math.ceil(centerX + searchWidth / 2));
+    var bottom = Math.min(imageHeight, Math.ceil(centerY + searchHeight / 2));
+    var width = right - left;
+    var height = bottom - top;
+    if (width < 4 || height < 4) return null;
+
+    var pixels = context.getImageData(left, top, width, height).data;
+    var visited = new Uint8Array(width * height);
+    var best = null;
+
+    function offset(x, y) { return (y * width + x) * 4; }
+    function index(x, y) { return y * width + x; }
+
+    for (var y = 0; y < height; y += 1) {
+      for (var x = 0; x < width; x += 1) {
+        var startIndex = index(x, y);
+        if (visited[startIndex] || !darkPixel(pixels, offset(x, y))) continue;
+
+        var stack = [[x, y]];
+        visited[startIndex] = 1;
+        var minX = x;
+        var maxX = x;
+        var minY = y;
+        var maxY = y;
+        var area = 0;
+
+        while (stack.length) {
+          var point = stack.pop();
+          var px = point[0];
+          var py = point[1];
+          area += 1;
+          minX = Math.min(minX, px);
+          maxX = Math.max(maxX, px);
+          minY = Math.min(minY, py);
+          maxY = Math.max(maxY, py);
+
+          [[px + 1, py], [px - 1, py], [px, py + 1], [px, py - 1]].forEach(function (next) {
+            var nx = next[0];
+            var ny = next[1];
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) return;
+            var nextIndex = index(nx, ny);
+            if (visited[nextIndex] || !darkPixel(pixels, offset(nx, ny))) return;
+            visited[nextIndex] = 1;
+            stack.push([nx, ny]);
+          });
+        }
+
+        var boxWidth = maxX - minX + 1;
+        var boxHeight = maxY - minY + 1;
+        if (area < 10 || boxWidth < 4 || boxHeight < 4) continue;
+        if (boxWidth > width * 0.92 || boxHeight > height * 0.92) continue;
+        var componentCenterX = left + minX + boxWidth / 2;
+        var componentCenterY = top + minY + boxHeight / 2;
+        var distance = Math.hypot(componentCenterX - centerX, componentCenterY - centerY);
+        var score = distance - area * 0.02;
+        if (!best || score < best.score) {
+          best = {
+            left: ((left + minX) / imageWidth) * 100,
+            top: ((top + minY) / imageHeight) * 100,
+            width: (boxWidth / imageWidth) * 100,
+            height: (boxHeight / imageHeight) * 100,
+            score: score,
+          };
+        }
+      }
+    }
+
+    if (!best) return null;
+    var detected = shrinkDetectedRect(best);
+    return plausibleDetectedRect(detected, rect) ? detected : null;
+  }
+
+  window.enablePortMapEditor = function () {
+    if (!PORT_LAYOUT_URL) return;
+    var container = document.querySelector('.port-diagram');
+    if (!container) return;
+    document.body.classList.add('port-map-editing');
+    clearDetectedPortOutlines();
+    var detection = HAS_SAVED_PORT_MAP ? null : getFaceplateDetectionContext();
+    var result = buildPortCandidates(detection);
+    detectedPortCandidates = result.candidates;
+    portTargetAssignments.clear();
+    document.querySelectorAll('[data-port-name]').forEach(function (port, index) {
+      portTargetAssignments.set(port, index);
+    });
+    detectedPortCandidates.forEach(function (candidate) { addDetectedPortOutline(container, candidate.rect, !candidate.matched); });
+    document.getElementById('port-map-editor-bar').style.display = '';
+    document.getElementById('port-map-edit-btn').style.display = 'none';
+    document.querySelectorAll('[data-port-name]').forEach(function (port) {
+      enablePortDrag(port, container);
+    });
+    var gridHandle = container.querySelector('.port-grid-handle');
+    if (gridHandle) enablePortGridDrag(gridHandle, container);
+  };
+
+  window.disablePortMapEditor = function () {
+    document.body.classList.remove('port-map-editing');
+    clearDetectedPortOutlines();
+    detectedPortCandidates = [];
+    portTargetAssignments.clear();
+    var bar = document.getElementById('port-map-editor-bar');
+    var editButton = document.getElementById('port-map-edit-btn');
+    if (bar) bar.style.display = 'none';
+    if (editButton) editButton.style.display = '';
+  };
+
+  window.resetPortMapLayout = function () {
+    var container = document.querySelector('.port-diagram');
+    clearDetectedPortOutlines();
+    if (container) detectedPortCandidates.forEach(function (candidate) { addDetectedPortOutline(container, candidate.rect, !candidate.matched); });
+    document.querySelectorAll('[data-port-name]').forEach(function (port) {
+      setPortRect(port, getDefaultPortRect(port));
+    });
+  };
+
+  window.snapPortMapLayout = function () {
+    var container = document.querySelector('.port-diagram');
+    if (!container) return;
+    if (!detectedPortCandidates.length) {
+      var detection = getFaceplateDetectionContext();
+      detectedPortCandidates = buildPortCandidates(detection).candidates;
+    }
+    if (!detectedPortCandidates.length) {
+      showFlash('Faceplate image is still loading.', 'info');
+      return;
+    }
+    clearDetectedPortOutlines();
+    detectedPortCandidates.forEach(function (candidate) { addDetectedPortOutline(container, candidate.rect, !candidate.matched); });
+    var used = new Set();
+    var snapped = 0;
+    document.querySelectorAll('[data-port-name]').forEach(function (port) {
+      var detected = nearestCandidate(getPercentRect(port, container), detectedPortCandidates, used);
+      if (detected) {
+        setPortRect(port, detected.rect);
+        used.add(detected.index);
+        portTargetAssignments.set(port, detected.index);
+        snapped += 1;
+      } else {
+        addDetectedPortOutline(container, getPercentRect(port, container), true);
+      }
+    });
+    var matched = detectedPortCandidates.filter(function (candidate) { return candidate.matched; }).length;
+    showFlash('Mapped ' + detectedPortCandidates.length + ' port targets and snapped ' + snapped + ' overlays. Image-matched: ' + matched + '.', 'success');
+  };
+
+  window.detectPortMapLocally = function () {
+    var container = document.querySelector('.port-diagram');
+    var detection = getFaceplateDetectionContext();
+    if (!container || !detection) {
+      showFlash('Faceplate image is still loading.', 'info');
+      return;
+    }
+    var result = buildPortCandidates(detection);
+    detectedPortCandidates = result.candidates;
+    portTargetAssignments.clear();
+    clearDetectedPortOutlines();
+    detectedPortCandidates.forEach(function (candidate) {
+      addDetectedPortOutline(container, candidate.rect, !candidate.matched);
+    });
+    var used = new Set();
+    document.querySelectorAll('[data-port-name]').forEach(function (port) {
+      var detected = nearestCandidate(getDefaultPortRect(port), detectedPortCandidates, used);
+      if (!detected) return;
+      setPortRect(port, detected.rect);
+      used.add(detected.index);
+      portTargetAssignments.set(port, detected.index);
+    });
+    showFlash('Local detection found ' + result.matched + ' image-matched port targets. Adjust, then save.', 'success');
+  };
+
+  window.detectPortMapWithGemini = function () {
+    if (!GEMINI_PORT_LAYOUT_URL) return;
+    showFlash('Requesting Gemini port detection...', 'info');
+    fetch(GEMINI_PORT_LAYOUT_URL, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': CSRF_TOKEN,
+        'Accept': 'application/json',
+      },
+    })
+      .then(function (r) {
+        return r.json().then(function (data) {
+          if (!r.ok) throw data;
+          return data;
+        });
+      })
+      .then(function (data) {
+        setDetectedPortCandidatesFromRects(data.ports, true);
+        showFlash('Gemini detected ' + data.count + ' port candidates and positioned the port overlays. Adjust, then save.', 'success');
+      })
+      .catch(function (error) {
+        showFlash(error && error.error ? error.error : 'Gemini detection failed.', 'error');
+      });
+  };
+
+  function updateGeminiKeyStatus(status) {
+    var el = document.getElementById('gemini-key-status');
+    if (!el || !status) return;
+    el.textContent = status.has_key ? 'Current key: ' + status.masked_key + ' (' + status.source + ')' : 'Current key: not configured';
+  }
+
+  window.openGeminiKeyModal = function () {
+    var overlay = document.getElementById('gemini-key-modal');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+    overlay.style.position = 'fixed';
+    overlay.style.zIndex = '9999';
+    if (GEMINI_KEY_URL) {
+      fetch(GEMINI_KEY_URL, {headers: {'Accept': 'application/json'}})
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(updateGeminiKeyStatus)
+        .catch(function () {});
+    }
+  };
+
+  window.closeGeminiKeyModal = function () {
+    var overlay = document.getElementById('gemini-key-modal');
+    var input = document.getElementById('gemini-api-key-input');
+    if (input) input.value = '';
+    if (!overlay) return;
+    overlay.style.display = 'none';
+    overlay.style.position = '';
+    overlay.style.zIndex = '';
+  };
+
+  window.handleGeminiKeyOverlayClick = function (event) {
+    if (event.target === document.getElementById('gemini-key-modal')) closeGeminiKeyModal();
+  };
+
+  window.saveGeminiApiKey = function () {
+    var input = document.getElementById('gemini-api-key-input');
+    if (!GEMINI_KEY_URL || !input) return;
+    fetch(GEMINI_KEY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': CSRF_TOKEN,
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({api_key: input.value}),
+    })
+      .then(function (r) {
+        return r.json().then(function (data) {
+          if (!r.ok) throw data;
+          return data;
+        });
+      })
+      .then(function (data) {
+        updateGeminiKeyStatus(data);
+        input.value = '';
+        showFlash('Gemini API key saved.', 'success');
+      })
+      .catch(function (error) {
+        showFlash(error && error.error ? error.error : 'Could not save Gemini API key.', 'error');
+      });
+  };
+
+  window.deleteGeminiApiKey = function () {
+    if (!GEMINI_KEY_URL) return;
+    fetch(GEMINI_KEY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': CSRF_TOKEN,
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({delete: true}),
+    })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function (data) {
+        updateGeminiKeyStatus(data);
+        showFlash('Saved Gemini API key removed.', 'success');
+      })
+      .catch(function () {
+        showFlash('Could not remove Gemini API key.', 'error');
+      });
+  };
+
+  window.savePortMapLayout = function () {
+    if (!PORT_LAYOUT_URL) return;
+    var container = document.querySelector('.port-diagram');
+    var ports = {};
+    document.querySelectorAll('[data-port-name]').forEach(function (port) {
+      var rect = clampRect(getPercentRect(port, container));
+      rect.inverted = port.classList.contains('port-inverted');
+      ports[port.getAttribute('data-port-name')] = rect;
+    });
+    fetch(PORT_LAYOUT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': CSRF_TOKEN,
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ports: ports}),
+    })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function () {
+        HAS_SAVED_PORT_MAP = true;
+        showFlash('Port map saved.', 'success');
+        disablePortMapEditor();
+      })
+      .catch(function () {
+        showFlash('Could not save port map.', 'error');
+      });
+  };
+})();
+
+function togglePendingPanel() {
+  var p = document.getElementById('pending-panel');
+  if (!p) return;
+  var open = p.style.display !== 'none';
+  p.style.display = open ? 'none' : 'block';
+  if (!open) p.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+function openSwitchModal() {
+  var overlay = document.getElementById('switch-modal');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  overlay.style.position = 'fixed';
+  overlay.style.zIndex = '9999';
+}
+
+function closeSwitchModal() {
+  var overlay = document.getElementById('switch-modal');
+  if (!overlay) return;
+  overlay.style.display = 'none';
+  overlay.style.position = '';
+  overlay.style.zIndex = '';
+}
+
+function handleSwitchOverlayClick(event) {
+  if (event.target === document.getElementById('switch-modal')) closeSwitchModal();
+}
+
+function showSwitchTab(tab) {
+  document.querySelectorAll('[data-switch-tab]').forEach(function (button) {
+    button.classList.toggle('active', button.getAttribute('data-switch-tab') === tab);
+  });
+  document.querySelectorAll('[data-switch-panel]').forEach(function (panel) {
+    panel.classList.toggle('active', panel.getAttribute('data-switch-panel') === tab);
+  });
+}
+</script>
+{% endblock %}

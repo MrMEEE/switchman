@@ -1,0 +1,462 @@
+{% load static %}
+{# Embed VLAN data as JSON for JS-driven detail panel & edit pre-fill #}
+<script>
+var VLAN_DATA = [
+  {% for vlan in vlans_list %}
+  {
+    name:       "{{ vlan.name|escapejs }}",
+    id:         {{ vlan.id|default:0 }},
+    id_list:    "{{ vlan.id_list|escapejs }}",
+    description:"{{ vlan.description|escapejs }}",
+    interfaces: [{% for i in vlan.interfaces %}"{{ i|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}],
+    mac_aging:  "{{ vlan.mac_aging|escapejs }}",
+    filter_in:  "{{ vlan.filter_in|escapejs }}",
+    filter_out: "{{ vlan.filter_out|escapejs }}",
+    l3_interface:"{{ vlan.l3_interface|escapejs }}",
+    l3_inet:    "",
+    l3_inet6:   "",
+  }{% if not forloop.last %},{% endif %}
+  {% endfor %}
+];
+// Attach IRB addresses indexed by l3_interface key
+var IRB_ADDR = {
+  {% for key, addrs in irb_addresses.items %}
+  "{{ key|escapejs }}": {"inet": "{{ addrs.inet|escapejs }}", "inet6": "{{ addrs.inet6|escapejs }}"}{% if not forloop.last %},{% endif %}
+  {% endfor %}
+};
+// Re-populate l3_inet/inet6 from IRB_ADDR
+VLAN_DATA.forEach(function(v) {
+  if (v.l3_interface && IRB_ADDR[v.l3_interface]) {
+    v.l3_inet  = IRB_ADDR[v.l3_interface].inet;
+    v.l3_inet6 = IRB_ADDR[v.l3_interface].inet6;
+  } else {
+    v.l3_inet = v.l3_inet6 = "";
+  }
+});
+</script>
+
+<div class="section-header">
+  <h2>Switching &rsaquo; VLANs</h2>
+  <div class="section-header-actions">
+    <button class="button" onclick="openVlanModal('add')">+ Add VLAN</button>
+    <button class="button button-secondary" id="vlan-edit-btn" disabled onclick="editSelectedVlan()">Edit</button>
+    <button class="button button-danger" id="vlan-delete-btn" disabled onclick="deleteSelectedVlan()">Delete</button>
+  </div>
+</div>
+
+<div class="jweb-table-wrap">
+  <table class="jweb-table" id="vlan-table">
+    <thead>
+      <tr>
+        <th>VLAN Name</th>
+        <th>VLAN ID / Range</th>
+        <th>Member Interfaces</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for vlan in vlans_list %}
+    <tr class="vlan-row" data-name="{{ vlan.name }}" onclick="selectVlanRow(this, '{{ vlan.name|escapejs }}')">
+      <td><strong>{{ vlan.name }}</strong></td>
+      <td>
+        {% if vlan.id %}{{ vlan.id }}{% endif %}
+        {% if vlan.id_list %}<span class="badge-info">{{ vlan.id_list }}</span>{% endif %}
+        {% if not vlan.id and not vlan.id_list %}&mdash;{% endif %}
+      </td>
+      <td>
+        {% for iface in vlan.interfaces %}
+        <span class="iface-tag">{{ iface }}
+          <form method="post" action="{% url 'devices:remove_vlan_member' device.pk %}" style="display:inline" onclick="event.stopPropagation()">
+            {% csrf_token %}
+            <input type="hidden" name="vlan_name" value="{{ vlan.name }}">
+            <input type="hidden" name="interface_name" value="{{ iface }}">
+            <button type="submit" class="btn-remove" title="Remove {{ iface }} from {{ vlan.name }}"
+              onclick="return confirm('Remove {{ iface }} from VLAN {{ vlan.name }}?')">&times;</button>
+          </form>
+        </span>
+        {% empty %}&mdash;{% endfor %}
+      </td>
+      <td class="muted">{{ vlan.description|default:"&mdash;" }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="4" class="muted" style="text-align:center;padding:1.5rem">No VLANs — Sync Cache first or add one.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── VLAN Details Panel ── #}
+<div id="vlan-details" class="vlan-details-panel" style="display:none">
+  <h4 class="vlan-details-title">Details of VLAN: <strong id="d-name"></strong></h4>
+  <table class="vlan-details-table">
+    <tr><td>VLAN ID</td><td id="d-id"></td></tr>
+    <tr><td>VLAN Range</td><td id="d-id-list"></td></tr>
+    <tr><td>Description</td><td id="d-description"></td></tr>
+    <tr><td>Multilayer switching (RVI)</td><td id="d-l3"></td></tr>
+    <tr><td>IP address</td><td id="d-inet"></td></tr>
+    <tr><td>IPv6 address</td><td id="d-inet6"></td></tr>
+    <tr><td>MAC-Table-Aging-Time</td><td id="d-aging"></td></tr>
+    <tr><td>Input filter</td><td id="d-fin"></td></tr>
+    <tr><td>Output filter</td><td id="d-fout"></td></tr>
+    <tr><td>Member interfaces</td><td id="d-ifaces"></td></tr>
+  </table>
+</div>
+
+{# ── Add/Edit Modal ── #}
+<div id="vlan-modal" class="vlan-modal-overlay" style="display:none" onclick="handleOverlayClick(event)">
+  <div class="vlan-modal-box">
+    <div class="vlan-modal-header">
+      <span id="vlan-modal-title">Add VLAN</span>
+      <button class="vlan-modal-close" onclick="closeVlanModal()" title="Close">&times;</button>
+    </div>
+
+    {# Tab buttons #}
+    <div class="vlan-tabs">
+      <button class="vlan-tab-btn active" id="tab-btn-general"  onclick="showVlanTab('general')">General</button>
+      <button class="vlan-tab-btn"        id="tab-btn-ports"    onclick="showVlanTab('ports')">Ports</button>
+      <button class="vlan-tab-btn"        id="tab-btn-ipaddr"   onclick="showVlanTab('ipaddr')">IP address</button>
+      <button class="vlan-tab-btn"        id="tab-btn-voip"     onclick="showVlanTab('voip')">VoIP</button>
+    </div>
+
+    <form id="vlan-form" method="post" action="{% url 'devices:apply_vlan' device.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="edit_mode"           id="f-edit-mode"     value="add">
+      <input type="hidden" name="original_vlan_name"  id="f-original-name" value="">
+
+      {# ── General Tab ── #}
+      <div class="vlan-tab-content" id="vtab-general">
+        <div class="form-grid-2col">
+          <label>VLAN Name <span class="required">*</span></label>
+          <input type="text" name="vlan_name" id="f-name" required maxlength="64">
+
+          <label>VLAN ID / Range <span class="required">*</span></label>
+          <div class="vlan-id-group">
+            <label class="radio-label">
+              <input type="radio" name="id_type" value="id" id="f-idtype-id" checked onchange="toggleIdType()">
+              VLAN ID
+            </label>
+            <input type="number" name="vlan_id" id="f-id" min="1" max="4094" class="input-short">
+            <label class="radio-label" style="margin-left:1rem">
+              <input type="radio" name="id_type" value="range" id="f-idtype-range" onchange="toggleIdType()">
+              VLAN Range
+            </label>
+            <input type="text" name="vlan_range" id="f-range" placeholder="e.g. 100-200" class="input-short" disabled>
+          </div>
+
+          <label>Description</label>
+          <input type="text" name="description" id="f-desc" maxlength="128">
+
+          <label>MAC aging time <span class="field-hint">(seconds)</span></label>
+          <input type="number" name="mac_aging" id="f-aging" min="60" max="1000000" placeholder="default">
+        </div>
+      </div>
+
+      {# ── Ports Tab ── #}
+      <div class="vlan-tab-content" id="vtab-ports" style="display:none">
+        <div class="vlan-ports-layout">
+          <div class="vlan-ports-list-wrap">
+            <table class="vlan-ports-table">
+              <thead><tr><th>Port</th><th>Mode</th></tr></thead>
+              <tbody id="ports-tbody"></tbody>
+            </table>
+          </div>
+          <div class="vlan-ports-actions">
+            <button type="button" class="vlan-ports-btn" id="ports-add-btn" onclick="showPortAddRow()">Add&hellip;</button>
+            <button type="button" class="vlan-ports-btn" id="ports-remove-btn" disabled onclick="removeSelectedPort()">Remove</button>
+          </div>
+        </div>
+        {# inline add row #}
+        <div id="port-add-row" style="display:none;margin-top:0.8rem;display:none">
+          <div class="form-grid-2col" style="max-width:400px">
+            <label>Interface</label>
+            <select id="f-iface-pick">
+              <option value="">— select —</option>
+              {% for iface in interfaces_list %}
+              {% if iface.name|slice:":2" in "ge xe et fe" %}
+              <option value="{{ iface.name }}">{{ iface.name }}{% if iface.description %} – {{ iface.description }}{% endif %}</option>
+              {% endif %}
+              {% endfor %}
+            </select>
+            <label>Mode</label>
+            <select id="f-mode-pick">
+              <option value="access">Access</option>
+              <option value="trunk">Trunk</option>
+            </select>
+          </div>
+          <div style="margin-top:0.5rem;display:flex;gap:0.5rem">
+            <button type="button" class="button btn-sm" onclick="commitPortAdd()">Add</button>
+            <button type="button" class="button button-secondary btn-sm" onclick="cancelPortAdd()">Cancel</button>
+          </div>
+        </div>
+        {# hidden form fields submitted with VLAN form #}
+        <input type="hidden" name="interface_name" id="f-iface">
+        <input type="hidden" name="interface_mode" id="f-mode">
+      </div>
+
+      {# ── IP address Tab ── #}
+      <div class="vlan-tab-content" id="vtab-ipaddr" style="display:none">
+        {# IPv4 section #}
+        <div class="ip-section" id="ipv4-section">
+          <div class="ip-section-header">
+            <label class="radio-label">
+              <input type="checkbox" id="f-ipv4-enable" onchange="toggleIpSection('ipv4')">
+              <strong>IPv4 address</strong>
+            </label>
+            <button type="button" class="ip-section-toggle" onclick="toggleIpSection('ipv4')" id="ipv4-toggle">&#8722;</button>
+          </div>
+          <div id="ipv4-body" class="ip-section-body">
+            <div class="form-grid-2col">
+              <label>L3 Interface (RVI)</label>
+              <input type="text" name="l3_interface" id="f-l3" maxlength="32" placeholder="irb.10">
+
+              <label>IP address</label>
+              <input type="text" name="l3_inet" id="f-inet" maxlength="64" placeholder="192.168.1.1/24">
+
+              <label>Input filter</label>
+              <input type="text" name="filter_in" id="f-fin" maxlength="64" placeholder="None">
+
+              <label>Output filter</label>
+              <input type="text" name="filter_out" id="f-fout" maxlength="64" placeholder="None">
+            </div>
+          </div>
+        </div>
+
+        {# IPv6 section #}
+        <div class="ip-section" id="ipv6-section" style="margin-top:0.6rem">
+          <div class="ip-section-header">
+            <label class="radio-label">
+              <input type="checkbox" id="f-ipv6-enable" onchange="toggleIpSection('ipv6')">
+              <strong>IPv6 address</strong>
+            </label>
+            <button type="button" class="ip-section-toggle" onclick="toggleIpSection('ipv6')" id="ipv6-toggle">+</button>
+          </div>
+          <div id="ipv6-body" class="ip-section-body" style="display:none">
+            <div class="form-grid-2col">
+              <label>IPv6 address</label>
+              <input type="text" name="l3_inet6" id="f-inet6" maxlength="64" placeholder="2001:db8::1/64">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# ── VoIP Tab ── #}
+      <div class="vlan-tab-content" id="vtab-voip" style="display:none">
+        <div class="vlan-ports-layout">
+          <div class="vlan-ports-list-wrap">
+            <table class="vlan-ports-table">
+              <thead><tr><th>Ports</th></tr></thead>
+              <tbody><tr><td class="muted" style="padding:1rem;text-align:center">No VoIP ports configured.</td></tr></tbody>
+            </table>
+          </div>
+          <div class="vlan-ports-actions">
+            <button type="button" class="vlan-ports-btn" disabled>Add&hellip;</button>
+            <button type="button" class="vlan-ports-btn" disabled>Remove</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="vlan-modal-footer">
+        <button type="submit" class="button">OK</button>
+        <button type="button" class="button button-secondary" onclick="closeVlanModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Hidden delete form #}
+<form id="vlan-delete-form" method="post" action="{% url 'devices:delete_vlan' device.pk %}" style="display:none">
+  {% csrf_token %}<input type="hidden" name="vlan_name" id="vlan-delete-name">
+</form>
+
+<script>
+(function () {
+  var selectedVlanName = null;
+
+  window.selectVlanRow = function (row, name) {
+    // Deselect previous
+    document.querySelectorAll('.vlan-row').forEach(function(r) { r.classList.remove('selected'); });
+    row.classList.add('selected');
+    selectedVlanName = name;
+
+    // Enable Edit/Delete buttons
+    document.getElementById('vlan-edit-btn').disabled   = false;
+    document.getElementById('vlan-delete-btn').disabled = false;
+
+    // Populate details panel
+    var v = VLAN_DATA.find(function(x) { return x.name === name; });
+    if (!v) return;
+    document.getElementById('d-name').textContent       = v.name;
+    document.getElementById('d-id').textContent         = v.id || '—';
+    document.getElementById('d-id-list').textContent    = v.id_list || '—';
+    document.getElementById('d-description').textContent= v.description || '—';
+    document.getElementById('d-l3').textContent         = v.l3_interface || '—';
+    document.getElementById('d-inet').textContent       = v.l3_inet  || '—';
+    document.getElementById('d-inet6').textContent      = v.l3_inet6 || '—';
+    document.getElementById('d-aging').textContent      = v.mac_aging || 'default';
+    document.getElementById('d-fin').textContent        = v.filter_in  || 'None';
+    document.getElementById('d-fout').textContent       = v.filter_out || 'None';
+    document.getElementById('d-ifaces').textContent     = v.interfaces.length ? v.interfaces.join(', ') : '—';
+    document.getElementById('vlan-details').style.display = '';
+  };
+
+  window.openVlanModal = function (mode, vlanName) {
+    var overlay = document.getElementById('vlan-modal');
+    overlay.style.display = 'flex';
+    overlay.style.position = 'fixed';
+    overlay.style.zIndex   = '9999';
+    document.getElementById('f-edit-mode').value = mode;
+    document.getElementById('vlan-modal-title').textContent = mode === 'add' ? 'Add VLAN' : 'Edit VLAN';
+    showVlanTab('general');
+
+    if (mode === 'edit' && vlanName) {
+      var v = VLAN_DATA.find(function(x) { return x.name === vlanName; });
+      if (!v) return;
+      document.getElementById('f-original-name').value = v.name;
+      document.getElementById('f-name').value          = v.name;
+      document.getElementById('f-desc').value          = v.description;
+      document.getElementById('f-aging').value         = v.mac_aging;
+      document.getElementById('f-l3').value            = v.l3_interface;
+      document.getElementById('f-inet').value          = v.l3_inet;
+      document.getElementById('f-fin').value           = v.filter_in;
+      document.getElementById('f-fout').value          = v.filter_out;
+      document.getElementById('f-inet6').value         = v.l3_inet6;
+      // populate ports list
+      portsList = v.interfaces.map(function(n) { return {name: n, mode: 'access'}; });
+      renderPortsTable();
+      if (v.id_list) {
+        document.getElementById('f-idtype-range').checked = true;
+        document.getElementById('f-range').value = v.id_list;
+        document.getElementById('f-range').disabled = false;
+        document.getElementById('f-id').disabled    = true;
+        document.getElementById('f-id').value       = '';
+      } else {
+        document.getElementById('f-idtype-id').checked = true;
+        document.getElementById('f-id').value   = v.id || '';
+        document.getElementById('f-id').disabled = false;
+        document.getElementById('f-range').disabled = true;
+        document.getElementById('f-range').value    = '';
+      }
+    } else {
+      // Reset form for Add mode
+      document.getElementById('vlan-form').reset();
+      document.getElementById('f-edit-mode').value    = 'add';
+      document.getElementById('f-original-name').value = '';
+      document.getElementById('f-id').disabled    = false;
+      document.getElementById('f-range').disabled = true;
+      portsList = [];
+      renderPortsTable();
+    }
+  };
+
+  window.editSelectedVlan = function () {
+    if (selectedVlanName) openVlanModal('edit', selectedVlanName);
+  };
+
+  window.deleteSelectedVlan = function () {
+    if (!selectedVlanName) return;
+    if (!confirm('Delete VLAN "' + selectedVlanName + '"? This will stage a delete command.')) return;
+    document.getElementById('vlan-delete-name').value = selectedVlanName;
+    document.getElementById('vlan-delete-form').submit();
+  };
+
+  window.closeVlanModal = function () {
+    var overlay = document.getElementById('vlan-modal');
+    overlay.style.display = 'none';
+    overlay.style.position = '';
+    overlay.style.zIndex   = '';
+  };
+
+  window.handleOverlayClick = function (e) {
+    if (e.target === document.getElementById('vlan-modal')) closeVlanModal();
+  };
+
+  // Portal modal to <body> so position:fixed is never clipped by an overflow ancestor
+  (function () {
+    var el = document.getElementById('vlan-modal');
+    if (el && el.parentNode !== document.body) document.body.appendChild(el);
+    var df = document.getElementById('vlan-delete-form');
+    if (df && df.parentNode !== document.body) document.body.appendChild(df);
+  })();
+
+  // ── Ports tab list management ──
+  var portsList = []; // [{name, mode}]
+  var selectedPortIdx = null;
+
+  function renderPortsTable() {
+    var tbody = document.getElementById('ports-tbody');
+    tbody.innerHTML = '';
+    portsList.forEach(function(p, i) {
+      var tr = document.createElement('tr');
+      tr.className = 'ports-list-row' + (i === selectedPortIdx ? ' selected' : '');
+      tr.innerHTML = '<td>' + p.name + '</td><td>' + p.mode + '</td>';
+      tr.onclick = function() {
+        selectedPortIdx = i;
+        renderPortsTable();
+        document.getElementById('ports-remove-btn').disabled = false;
+      };
+      tbody.appendChild(tr);
+    });
+    // sync hidden form fields with first entry (backend handles one at a time)
+    document.getElementById('f-iface').value = portsList.length ? portsList[0].name : '';
+    document.getElementById('f-mode').value  = portsList.length ? portsList[0].mode : '';
+  }
+
+  window.showPortAddRow = function() {
+    document.getElementById('port-add-row').style.display = '';
+    document.getElementById('ports-add-btn').style.display = 'none';
+  };
+  window.cancelPortAdd = function() {
+    document.getElementById('port-add-row').style.display = 'none';
+    document.getElementById('ports-add-btn').style.display = '';
+    document.getElementById('f-iface-pick').value = '';
+  };
+  window.commitPortAdd = function() {
+    var name = document.getElementById('f-iface-pick').value;
+    var mode = document.getElementById('f-mode-pick').value;
+    if (!name) return;
+    if (!portsList.find(function(p) { return p.name === name; })) {
+      portsList.push({name: name, mode: mode});
+      renderPortsTable();
+    }
+    cancelPortAdd();
+  };
+  window.removeSelectedPort = function() {
+    if (selectedPortIdx === null) return;
+    portsList.splice(selectedPortIdx, 1);
+    selectedPortIdx = null;
+    document.getElementById('ports-remove-btn').disabled = true;
+    renderPortsTable();
+  };
+
+  // ── IPv4/IPv6 toggle ──
+  window.toggleIpSection = function(which) {
+    var body   = document.getElementById(which + 'v4-body') || document.getElementById('ipv' + (which === 'ipv4' ? '4' : '6') + '-body');
+    var toggle = document.getElementById(which + '-toggle');
+    // normalise: caller passes 'ipv4' or 'ipv6'
+    var bodyEl   = document.getElementById(which + '-body');
+    var toggleEl = document.getElementById(which + '-toggle');
+    var cb       = document.getElementById('f-' + which + '-enable');
+    if (!bodyEl) return;
+    var open = bodyEl.style.display !== 'none';
+    bodyEl.style.display  = open ? 'none' : '';
+    toggleEl.textContent  = open ? '+' : '\u2212';
+    if (cb) cb.checked = !open;
+  };
+
+  window.showVlanTab = function (tab) {
+    ['general', 'ports', 'ipaddr', 'voip'].forEach(function (t) {
+      document.getElementById('vtab-' + t).style.display       = t === tab ? '' : 'none';
+      document.getElementById('tab-btn-' + t).classList.toggle('active', t === tab);
+    });
+  };
+
+  window.toggleIdType = function () {
+    var useRange = document.getElementById('f-idtype-range').checked;
+    document.getElementById('f-id').disabled    =  useRange;
+    document.getElementById('f-range').disabled = !useRange;
+    if (useRange) document.getElementById('f-id').value    = '';
+    else          document.getElementById('f-range').value = '';
+  };
+})();
+</script>
+

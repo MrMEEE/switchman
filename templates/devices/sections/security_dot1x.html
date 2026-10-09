@@ -1,0 +1,12 @@
+<div class="section-header"><h2>Security &rsaquo; 802.1X Authentication</h2></div>
+
+{% if snapshot %}
+{% if snapshot.security.dot1x %}
+<pre class="code-pre">{{ snapshot.security.dot1x }}</pre>
+{% else %}
+<p class="muted">No 802.1X configuration found &mdash; run Sync Cache.</p>
+{% endif %}
+<p class="muted" style="margin-top:0.5rem">To modify 802.1X settings, use <a href="?tab=troubleshoot&section=ts_manual_set">CLI Tools</a>.</p>
+{% else %}
+<p class="muted">Run Sync Cache.</p>
+{% endif %}

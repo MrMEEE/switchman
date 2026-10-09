@@ -1,0 +1,12 @@
+<h2>System &rsaquo; Reboot / Halt</h2>
+<div class="panel panel-warn">
+  <p><strong>Warning:</strong> Rebooting will interrupt network services on this switch.</p>
+  <form method="post" action="{% url 'devices:manual_set' device.pk %}"
+        onsubmit="return confirm('Confirm REBOOT for {{ device.name }}? All traffic will be interrupted.')">
+    {% csrf_token %}
+    <input type="hidden" name="set_commands" value="request system reboot">
+    <input type="hidden" name="reason" value="Operator reboot via UI">
+    <input type="hidden" name="confirm_edge_case" value="true">
+    <button type="submit" class="button button-danger">Reboot Switch</button>
+  </form>
+</div>

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+    <div class="row">
+        <h1>User Management</h1>
+        {% if perms.auth.add_user %}
+            <a class="button" href="{% url 'accounts:user_create' %}">Create User</a>
+        {% endif %}
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Active</th>
+                <th>Permissions</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user_obj in users %}
+                <tr>
+                    <td>{{ user_obj.username }}</td>
+                    <td>{{ user_obj.email|default:"-" }}</td>
+                    <td>{% if user_obj.is_active %}Yes{% else %}No{% endif %}</td>
+                    <td>
+                        {% for perm in user_obj.user_permissions.all %}
+                            {% if perm.content_type.app_label == 'devices' %}
+                                <div>{{ perm.codename }}</div>
+                            {% endif %}
+                        {% empty %}
+                            -
+                        {% endfor %}
+                    </td>
+                    <td>
+                        {% if perms.auth.change_user %}
+                            <a href="{% url 'accounts:user_edit' user_obj.id %}">Edit</a>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

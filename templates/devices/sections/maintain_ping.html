@@ -1,0 +1,20 @@
+<h2>Ping Host</h2>
+<form method="post" action="{% url 'devices:run_ping' device.pk %}">{% csrf_token %}
+  <div class="form-grid">
+    <div class="form-field">
+      <label>Host / IP</label>
+      <input type="text" name="host" required placeholder="192.168.1.1">
+    </div>
+    <div class="form-field">
+      <label>Count</label>
+      <input type="number" name="count" value="5" min="1" max="100">
+    </div>
+  </div>
+  <div class="form-actions">
+    <button type="submit" class="button">Run Ping</button>
+  </div>
+</form>
+{% if last_ping %}
+<h4>Last Result</h4>
+<pre class="code-pre">{{ last_ping.output }}</pre>
+{% endif %}

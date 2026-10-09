@@ -1,0 +1,4 @@
+<h2>LLDP Neighbors</h2>
+{% if snapshot %}
+<pre class="code-pre">{{ snapshot.vlans.lldp|default:"No LLDP data &mdash; Sync Cache." }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

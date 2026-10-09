@@ -1,0 +1,12 @@
+<h2>Staged Changes</h2>
+<pre class="code-pre">{{ compare_text }}</pre>
+{% if pending_changes %}
+<div class="form-actions">
+  <form method="post" action="{% url 'devices:commit_staged' device.pk %}" style="display:inline">{% csrf_token %}
+    <button class="button">Commit All</button>
+  </form>
+  <form method="post" action="{% url 'devices:discard_staged' device.pk %}" style="display:inline">{% csrf_token %}
+    <button class="button button-danger" onclick="return confirm('Discard all staged changes?')">Discard All</button>
+  </form>
+</div>
+{% endif %}

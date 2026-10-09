@@ -1,0 +1,11 @@
+Django==5.2.1
+paramiko==3.5.1
+ncclient==0.6.15
+ansible-core==2.17.6
+junos-eznc==2.7.3
+celery>=5.6
+redis>=7.4
+django-celery-beat>=2.9
+django-celery-results>=2.6
+pysnmp>=7,<8
+

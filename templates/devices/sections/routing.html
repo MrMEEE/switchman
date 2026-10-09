@@ -1,0 +1,53 @@
+<div class="section-header">
+  <h2>Routing Options &rsaquo; Static Routes</h2>
+  <button class="button button-secondary" onclick="document.getElementById('route-panel').style.display='block'">+ Add Route</button>
+</div>
+
+<div class="jweb-table-wrap">
+  <table class="jweb-table">
+    <thead><tr><th>Prefix</th><th>Next Hop(s)</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for route in static_routes %}
+    <tr>
+      <td><strong>{{ route.prefix }}</strong></td>
+      <td>{{ route.next_hops|join:", " }}</td>
+      <td>
+        <form method="post" action="{% url 'devices:delete_static_route' device.pk %}" style="display:inline">
+          {% csrf_token %}
+          <input type="hidden" name="prefix" value="{{ route.prefix }}">
+          <button type="submit" class="button button-danger btn-sm"
+            onclick="return confirm('Delete route {{ route.prefix }}?')">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="3" class="muted">No static routes configured &mdash; Sync Cache or add one.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div id="route-panel" class="edit-panel" style="display:none">
+  <h3>Add Static Route</h3>
+  <form method="post" action="{% url 'devices:apply_static_route' device.pk %}">{% csrf_token %}
+    <div class="form-grid">
+      <div class="form-field">
+        <label>Prefix <span class="muted">(e.g. 0.0.0.0/0)</span></label>
+        <input type="text" name="prefix" required placeholder="0.0.0.0/0">
+      </div>
+      <div class="form-field">
+        <label>Next Hop <span class="muted">(IP address)</span></label>
+        <input type="text" name="next_hop" required placeholder="192.168.1.1">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="button">Stage</button>
+      <button type="button" class="button button-secondary" onclick="document.getElementById('route-panel').style.display='none'">Cancel</button>
+    </div>
+  </form>
+</div>
+
+{% if snapshot and snapshot.routing.config %}
+<h4 style="margin-top:1.5rem">Full Routing Config</h4>
+<pre class="code-pre">{{ snapshot.routing.config }}</pre>
+{% endif %}

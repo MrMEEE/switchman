@@ -1,0 +1,343 @@
+{# Embed LAG data for JS-driven details panel & edit pre-fill #}
+<script>
+var LAG_DATA = [
+  {% for lag in lags_list %}
+  {
+    name:       "{{ lag.name|escapejs }}",
+    description:"{{ lag.description|escapejs }}",
+    admin:      "{{ lag.admin|escapejs }}",
+    link:       "{{ lag.link|escapejs }}",
+    lacp_mode:  "{{ lag.lacp_mode|escapejs }}",
+    min_links:  "{{ lag.min_links|escapejs }}",
+    members:    [{% for m in lag.members %}"{{ m|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}],
+  }{% if not forloop.last %},{% endif %}
+  {% endfor %}
+];
+</script>
+
+<div class="section-header">
+  <h2>Interfaces &rsaquo; Link Aggregation (LACP)</h2>
+  <div class="section-header-actions">
+    <button class="button button-secondary" onclick="openDeviceCountModal()">Device Count</button>
+    <button class="button" onclick="openLagModal('add')">Add</button>
+    <button class="button button-secondary" id="lag-edit-btn"   disabled onclick="editSelectedLag()">Edit</button>
+    <button class="button button-danger"    id="lag-delete-btn" disabled onclick="deleteSelectedLag()">Delete</button>
+  </div>
+</div>
+
+<div class="jweb-table-wrap">
+  <table class="jweb-table" id="lag-table">
+    <thead>
+      <tr>
+        <th>Aggregated Interface</th>
+        <th>Admin</th>
+        <th>Link</th>
+        <th>LACP Mode</th>
+        <th>Min Links</th>
+        <th>Member Interfaces</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for lag in lags_list %}
+    <tr class="lag-row" data-name="{{ lag.name }}" onclick="selectLagRow(this, '{{ lag.name|escapejs }}')">
+      <td><strong>{{ lag.name }}</strong></td>
+      <td><span class="status-badge {% if lag.admin == 'up' %}status-up{% elif lag.admin == 'disabled' %}status-disabled{% else %}status-down{% endif %}">{{ lag.admin }}</span></td>
+      <td><span class="status-badge {% if lag.link == 'up' %}status-up{% else %}status-down{% endif %}">{{ lag.link }}</span></td>
+      <td>{{ lag.lacp_mode|default:"off" }}</td>
+      <td>{{ lag.min_links|default:"&mdash;" }}</td>
+      <td>{{ lag.members|join:", "|default:"&mdash;" }}</td>
+      <td class="muted">{{ lag.description|default:"&mdash;" }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="7" class="muted" style="text-align:center;padding:1.5rem">No LAG interfaces configured &mdash; Sync Cache or add one.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── Details Panel ── #}
+<div id="lag-details" class="vlan-details-panel" style="display:none">
+  <h4 class="vlan-details-title">Details of Aggregation: <strong id="ld-name"></strong></h4>
+  <table class="vlan-details-table">
+    <tr><td>Admin Status</td><td id="ld-admin"></td></tr>
+    <tr><td>Link Status</td><td id="ld-link"></td></tr>
+    <tr><td>LACP Mode</td><td id="ld-lacp"></td></tr>
+    <tr><td>Min Links</td><td id="ld-minlinks"></td></tr>
+    <tr><td>Member Interfaces</td><td id="ld-members"></td></tr>
+    <tr><td>Description</td><td id="ld-desc"></td></tr>
+  </table>
+</div>
+
+{# ── Create / Edit Aggregation Modal ── #}
+<div id="lag-modal" class="vlan-modal-overlay" style="display:none" onclick="handleLagOverlayClick(event)">
+  <div class="vlan-modal-box">
+    <div class="vlan-modal-header">
+      <span id="lag-modal-title">Create Aggregation</span>
+      <button class="vlan-modal-close" onclick="closeLagModal()">&times;</button>
+    </div>
+    <form id="lag-form" method="post" action="{% url 'devices:apply_lag' device.pk %}"
+          onsubmit="serializeLagMembers()">
+      {% csrf_token %}
+      <div class="vlan-tab-content">
+        <div class="form-grid-2col">
+          <label>Aggregated Interface</label>
+          <input type="text" name="lag_name" id="f-lag-name" required pattern="ae\d+"
+                 placeholder="ae0" style="font-family:monospace">
+
+          <label>LACP Mode</label>
+          <select name="lacp_mode" id="f-lag-lacp">
+            <option value="off">none</option>
+            <option value="active">active</option>
+            <option value="passive">passive</option>
+          </select>
+
+          <label>Description</label>
+          <input type="text" name="description" id="f-lag-desc" maxlength="128">
+
+          <label>Min Links</label>
+          <input type="number" name="min_links" id="f-lag-minlinks" min="1" max="8" placeholder="—">
+        </div>
+
+        {# Member interfaces listbox #}
+        <div style="margin-top:1rem">
+          <div class="vlan-ports-layout">
+            <div class="vlan-ports-list-wrap">
+              <table class="vlan-ports-table">
+                <thead><tr><th>Interfaces</th><th>Speed</th></tr></thead>
+                <tbody id="lag-ifaces-tbody"></tbody>
+              </table>
+            </div>
+            <div class="vlan-ports-actions">
+              <button type="button" class="vlan-ports-btn" id="lag-iface-add-btn" onclick="showLagIfaceAdd()">Add&hellip;</button>
+              <button type="button" class="vlan-ports-btn" id="lag-iface-remove-btn" disabled onclick="removeLagIface()">Remove&hellip;</button>
+            </div>
+          </div>
+          {# inline add row #}
+          <div id="lag-iface-add-row" style="display:none;margin-top:0.6rem">
+            <div class="form-grid-2col" style="max-width:420px">
+              <label>Interface</label>
+              <select id="f-lag-iface-pick">
+                <option value="">— select —</option>
+                {% for iface in interfaces_list %}
+                {% if iface.name|slice:":2" in "ge xe et fe" %}
+                <option value="{{ iface.name }}">{{ iface.name }}{% if iface.description %} &ndash; {{ iface.description }}{% endif %}</option>
+                {% endif %}
+                {% endfor %}
+              </select>
+            </div>
+            <div style="margin-top:0.4rem;display:flex;gap:0.5rem">
+              <button type="button" class="button btn-sm" onclick="commitLagIface()">Add</button>
+              <button type="button" class="button button-secondary btn-sm" onclick="cancelLagIfaceAdd()">Cancel</button>
+            </div>
+          </div>
+          <input type="hidden" name="member_interfaces" id="f-lag-members">
+        </div>
+
+        <div style="margin-top:1rem">
+          <label class="radio-label">
+            <input type="checkbox" name="enable_log" id="f-lag-log">
+            Enable Log
+          </label>
+        </div>
+      </div>
+      <div class="vlan-modal-footer">
+        <button type="submit" class="button">OK</button>
+        <button type="button" class="button button-secondary" onclick="closeLagModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Device Count Modal ── #}
+<div id="devcount-modal" class="vlan-modal-overlay" style="display:none" onclick="handleDcOverlayClick(event)">
+  <div class="vlan-modal-box" style="width:360px">
+    <div class="vlan-modal-header">
+      Edit Device Count Settings
+      <button class="vlan-modal-close" onclick="closeDeviceCountModal()">&times;</button>
+    </div>
+    <form method="post" action="{% url 'devices:set_lag_device_count' device.pk %}">
+      {% csrf_token %}
+      <div class="vlan-tab-content">
+        <div style="margin-bottom:0.8rem">
+          <label class="radio-label">
+            <input type="checkbox" name="enable_aggregation" id="f-devcount-enable" checked>
+            Enable Aggregation
+          </label>
+        </div>
+        <div class="form-grid-2col">
+          <label>Device Count</label>
+          <input type="number" name="device_count" id="f-devcount" min="1" max="64" value="8">
+        </div>
+      </div>
+      <div class="vlan-modal-footer">
+        <button type="submit" class="button">OK</button>
+        <button type="button" class="button button-secondary" onclick="closeDeviceCountModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Hidden delete form #}
+<form id="lag-delete-form" method="post" action="{% url 'devices:delete_lag' device.pk %}" style="display:none">
+  {% csrf_token %}<input type="hidden" name="lag_name" id="lag-delete-name">
+</form>
+
+<script>
+(function () {
+  var selectedLagName   = null;
+  var lagMembersList    = [];
+  var selectedMemberIdx = null;
+
+  function portalModal(id) {
+    var el = document.getElementById(id);
+    if (el && el.parentNode !== document.body) document.body.appendChild(el);
+  }
+
+  // ── Row selection ──────────────────────────────────────────
+  window.selectLagRow = function (row, name) {
+    document.querySelectorAll('.lag-row').forEach(function(r) { r.classList.remove('selected'); });
+    row.classList.add('selected');
+    selectedLagName = name;
+    document.getElementById('lag-edit-btn').disabled   = false;
+    document.getElementById('lag-delete-btn').disabled = false;
+    var v = LAG_DATA.find(function(x) { return x.name === name; });
+    if (!v) return;
+    document.getElementById('ld-name').textContent     = v.name;
+    document.getElementById('ld-admin').textContent    = v.admin;
+    document.getElementById('ld-link').textContent     = v.link;
+    document.getElementById('ld-lacp').textContent     = v.lacp_mode || 'off';
+    document.getElementById('ld-minlinks').textContent = v.min_links || '—';
+    document.getElementById('ld-members').textContent  = v.members.length ? v.members.join(', ') : '—';
+    document.getElementById('ld-desc').textContent     = v.description || '—';
+    document.getElementById('lag-details').style.display = '';
+  };
+
+  // ── Lag modal ──────────────────────────────────────────────
+  window.openLagModal = function (mode, lagName) {
+    portalModal('lag-modal');
+    portalModal('lag-delete-form');
+    var overlay = document.getElementById('lag-modal');
+    overlay.style.display  = 'flex';
+    overlay.style.position = 'fixed';
+    overlay.style.zIndex   = '9999';
+    document.getElementById('lag-modal-title').textContent =
+      mode === 'add' ? 'Create Aggregation' : 'Edit Aggregation';
+    lagMembersList    = [];
+    selectedMemberIdx = null;
+    document.getElementById('lag-iface-remove-btn').disabled = true;
+    cancelLagIfaceAdd();
+    if (mode === 'edit' && lagName) {
+      var v = LAG_DATA.find(function(x) { return x.name === lagName; });
+      if (!v) return;
+      document.getElementById('f-lag-name').value     = v.name;
+      document.getElementById('f-lag-name').readOnly  = true;
+      document.getElementById('f-lag-lacp').value     = v.lacp_mode || 'off';
+      document.getElementById('f-lag-desc').value     = v.description;
+      document.getElementById('f-lag-minlinks').value = v.min_links;
+      lagMembersList = v.members.map(function(m) { return {name: m}; });
+    } else {
+      document.getElementById('lag-form').reset();
+      document.getElementById('f-lag-name').readOnly = false;
+    }
+    renderLagMembers();
+  };
+
+  window.editSelectedLag = function () {
+    if (selectedLagName) openLagModal('edit', selectedLagName);
+  };
+
+  window.closeLagModal = function () {
+    var overlay = document.getElementById('lag-modal');
+    overlay.style.display  = 'none';
+    overlay.style.position = '';
+    overlay.style.zIndex   = '';
+  };
+
+  window.handleLagOverlayClick = function (e) {
+    if (e.target === document.getElementById('lag-modal')) closeLagModal();
+  };
+
+  // ── Delete ─────────────────────────────────────────────────
+  window.deleteSelectedLag = function () {
+    if (!selectedLagName) return;
+    if (!confirm('Delete LAG "' + selectedLagName + '"? This will stage delete commands.')) return;
+    document.getElementById('lag-delete-name').value = selectedLagName;
+    document.getElementById('lag-delete-form').submit();
+  };
+
+  // ── Member listbox ─────────────────────────────────────────
+  function renderLagMembers() {
+    var tbody = document.getElementById('lag-ifaces-tbody');
+    tbody.innerHTML = '';
+    if (!lagMembersList.length) {
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="2" class="muted" style="padding:0.6rem;text-align:center">No members</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+    lagMembersList.forEach(function(m, i) {
+      var tr = document.createElement('tr');
+      tr.className = 'ports-list-row' + (i === selectedMemberIdx ? ' selected' : '');
+      tr.innerHTML = '<td>' + m.name + '</td><td class="muted">&mdash;</td>';
+      tr.onclick = function () {
+        selectedMemberIdx = i;
+        renderLagMembers();
+        document.getElementById('lag-iface-remove-btn').disabled = false;
+      };
+      tbody.appendChild(tr);
+    });
+  }
+
+  window.showLagIfaceAdd = function () {
+    document.getElementById('lag-iface-add-row').style.display = '';
+    document.getElementById('lag-iface-add-btn').style.display = 'none';
+  };
+  window.cancelLagIfaceAdd = function () {
+    document.getElementById('lag-iface-add-row').style.display = 'none';
+    document.getElementById('lag-iface-add-btn').style.display = '';
+    var pick = document.getElementById('f-lag-iface-pick');
+    if (pick) pick.value = '';
+  };
+  window.commitLagIface = function () {
+    var name = document.getElementById('f-lag-iface-pick').value;
+    if (!name) return;
+    if (!lagMembersList.find(function(m) { return m.name === name; })) {
+      lagMembersList.push({name: name});
+      renderLagMembers();
+    }
+    cancelLagIfaceAdd();
+  };
+  window.removeLagIface = function () {
+    if (selectedMemberIdx === null) return;
+    lagMembersList.splice(selectedMemberIdx, 1);
+    selectedMemberIdx = null;
+    document.getElementById('lag-iface-remove-btn').disabled = true;
+    renderLagMembers();
+  };
+
+  window.serializeLagMembers = function () {
+    document.getElementById('f-lag-members').value =
+      lagMembersList.map(function(m) { return m.name; }).join(',');
+  };
+
+  // ── Device Count modal ─────────────────────────────────────
+  window.openDeviceCountModal = function () {
+    portalModal('devcount-modal');
+    var overlay = document.getElementById('devcount-modal');
+    overlay.style.display  = 'flex';
+    overlay.style.position = 'fixed';
+    overlay.style.zIndex   = '9999';
+  };
+  window.closeDeviceCountModal = function () {
+    var overlay = document.getElementById('devcount-modal');
+    overlay.style.display  = 'none';
+    overlay.style.position = '';
+    overlay.style.zIndex   = '';
+  };
+  window.handleDcOverlayClick = function (e) {
+    if (e.target === document.getElementById('devcount-modal')) closeDeviceCountModal();
+  };
+})();
+</script>
+

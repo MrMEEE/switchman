@@ -1,0 +1,33 @@
+<div class="section-header"><h2>System &rsaquo; Identity</h2></div>
+
+<form method="post" action="{% url 'devices:apply_system' device.pk %}">{% csrf_token %}
+  <div class="form-grid">
+    <div class="form-field">
+      <label>Hostname <span class="required">*</span></label>
+      <input type="text" name="hostname" value="{{ system_form.hostname.value|default:'' }}" required maxlength="63">
+      {% if system_form.hostname.errors %}<span class="field-error">{{ system_form.hostname.errors|join:', ' }}</span>{% endif %}
+    </div>
+    <div class="form-field">
+      <label>Domain Name</label>
+      <input type="text" name="domain_name" value="{{ system_form.domain_name.value|default:'' }}" maxlength="128" placeholder="example.com">
+    </div>
+    <div class="form-field">
+      <label>Primary Name Server</label>
+      <input type="text" name="name_server" value="{{ system_form.name_server.value|default:'' }}" placeholder="8.8.8.8">
+      <span class="field-hint">Single IP &mdash; additional servers via CLI</span>
+    </div>
+    <div class="form-field">
+      <label>NTP Server</label>
+      <input type="text" name="ntp_server" value="{{ system_form.ntp_server.value|default:'' }}" placeholder="pool.ntp.org">
+      <span class="field-hint">Manage multiple NTP servers in the NTP section</span>
+    </div>
+    <div class="form-field">
+      <label>Timezone</label>
+      <input type="text" name="timezone" value="{{ system_form.timezone.value|default:'UTC' }}" maxlength="64" placeholder="America/New_York">
+      <span class="field-hint">IANA timezone, e.g. Europe/London</span>
+    </div>
+  </div>
+  <div class="form-actions">
+    <button type="submit" class="button">Stage / Apply</button>
+  </div>
+</form>

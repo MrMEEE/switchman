@@ -1,0 +1,4 @@
+<h2>MAC Table</h2>
+{% if snapshot %}
+<pre class="code-pre">{{ snapshot.monitor.mac_table|default:"No MAC table data &mdash; Sync Cache." }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

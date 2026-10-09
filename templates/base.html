@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Switch Control Center</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    {% block full_page %}
+    <header class="app-header">
+        <div class="brand">J-Web Style Switch Control</div>
+        <nav class="top-tabs">
+            <a href="/" {% if request.path == "/" %}class="active"{% endif %}>Dashboard</a>
+            <a href="/devices/">Devices</a>
+            {% if perms.auth.view_user %}<a href="/accounts/users/">Users</a>{% endif %}
+            {% if request.user.is_authenticated %}
+                <a href="/accounts/logout/">Logout {{ request.user.username }}</a>
+            {% else %}
+                <a href="/accounts/login/">Login</a>
+            {% endif %}
+        </nav>
+    </header>
+    <main class="content">
+        {% if messages %}
+            <div class="messages">
+                {% for message in messages %}
+                    <div class="message {{ message.tags }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+    {% endblock %}
+</body>
+</html>

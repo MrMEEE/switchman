@@ -1,0 +1,4 @@
+<h2>Routing Summary</h2>
+{% if snapshot %}
+<pre class="code-pre">{{ snapshot.routing.summary|default:"No routing data &mdash; Sync Cache." }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

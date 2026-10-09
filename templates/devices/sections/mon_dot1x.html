@@ -1,0 +1,4 @@
+<h2>802.1X Authentication</h2>
+{% if snapshot %}
+<pre class="code-pre">{{ snapshot.security.dot1x|default:"No 802.1X data &mdash; Sync Cache." }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

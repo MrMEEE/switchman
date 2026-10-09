@@ -1,0 +1,16 @@
+<h2>Traceroute</h2>
+<form method="post" action="{% url 'devices:run_traceroute' device.pk %}">{% csrf_token %}
+  <div class="form-grid">
+    <div class="form-field">
+      <label>Host / IP</label>
+      <input type="text" name="host" required placeholder="8.8.8.8">
+    </div>
+  </div>
+  <div class="form-actions">
+    <button type="submit" class="button">Run Traceroute</button>
+  </div>
+</form>
+{% if last_traceroute %}
+<h4>Last Result</h4>
+<pre class="code-pre">{{ last_traceroute.output }}</pre>
+{% endif %}

@@ -1,0 +1,7 @@
+<h2>Ethernet Switching</h2>
+{% if snapshot %}
+<h4>Summary</h4>
+<pre class="code-pre">{{ snapshot.monitor.switching_summary|default:"No data" }}</pre>
+<h4>MAC Table</h4>
+<pre class="code-pre">{{ snapshot.monitor.mac_table|default:"No data" }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

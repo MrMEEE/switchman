@@ -1,0 +1,492 @@
+<script>
+var IFACE_DATA = [
+{% for iface in interfaces_list %}{"name":"{{ iface.name|escapejs }}","admin":"{{ iface.admin|escapejs }}","link":"{{ iface.link|escapejs }}","mode":"{{ iface.mode|escapejs }}","vlans":[{% for v in iface.vlans %}"{{ v|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}],"native_vlan":"{{ iface.native_vlan|escapejs }}","mtu":"{{ iface.mtu|escapejs }}","description":"{{ iface.description|escapejs }}","inet":"{{ iface.inet|escapejs }}","inet6":"{{ iface.inet6|escapejs }}"}{% if not forloop.last %},{% endif %}
+{% endfor %}];
+var VLAN_NAMES = [{% for v in vlans_list %}"{{ v.name|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}];
+</script>
+
+<div class="section-header">
+  <div style="display:flex;align-items:center;gap:1.2rem">
+    <h2>Port Configuration</h2>
+    <label style="font-size:.9rem;color:#444">List ports for FPC:
+      <select id="fpc-filter" style="margin-left:.4rem;padding:.2rem .4rem;border:1px solid #c4d4e0;border-radius:4px">
+        <option value="">All</option>
+      </select>
+    </label>
+  </div>
+  <div class="section-header-actions">
+    <div style="position:relative;display:inline-block" id="edit-btn-wrap">
+      <button class="button" id="port-edit-btn" disabled onclick="togglePortEditMenu(event)">Edit &#9660;</button>
+      <div id="port-edit-menu" class="split-btn-menu" style="display:none">
+        <button onclick="openIfaceModal('port_role')">Port Role</button>
+        <button onclick="openIfaceModal('vlan_options')">VLAN Options</button>
+        <button onclick="openIfaceModal('link_options')">Link Options</button>
+        <button onclick="openIfaceModal('ip_options')">IP Options</button>
+      </div>
+    </div>
+    <button class="button button-danger" id="port-disable-btn" disabled onclick="submitDisablePort()">Disable Port</button>
+  </div>
+</div>
+
+<div class="jweb-table-wrap">
+  <table class="jweb-table">
+    <thead>
+      <tr>
+        <th>Port</th>
+        <th>Link Status</th>
+        <th>Type</th>
+        <th>Port Role</th>
+        <th>VLAN (VLAN ID)</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody id="iface-tbody">
+    {% for iface in interfaces_list %}
+    {% if iface.name|slice:":2" in "ge xe et fe" %}
+    <tr class="iface-row"
+        data-name="{{ iface.name }}"
+        data-fpc="{{ iface.name|slice:'3:4' }}">
+      <td><strong>{{ iface.name }}</strong></td>
+      <td>
+        <span class="status-badge {% if iface.link == 'up' %}status-up{% else %}status-down{% endif %}">
+          {{ iface.link }}
+        </span>
+      </td>
+      <td class="muted">
+        {% if iface.name|slice:":2" == "ge" %}Gigabit Ethernet
+        {% elif iface.name|slice:":2" == "xe" %}10-Gigabit Ethernet
+        {% elif iface.name|slice:":2" == "et" %}100-Gigabit Ethernet
+        {% else %}Fast Ethernet{% endif %}
+      </td>
+      <td class="muted">None</td>
+      <td class="muted">{{ iface.vlans|join:", "|default:"&mdash;" }}</td>
+      <td class="muted">{{ iface.description|default:"&mdash;" }}</td>
+    </tr>
+    {% endif %}
+    {% empty %}
+    <tr><td colspan="6" class="muted">No interface data &mdash; use Sync Cache.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div id="iface-details" class="vlan-details-panel" style="display:none">
+  <div class="vlan-details-title" id="iface-details-title">Port Details</div>
+  <table class="vlan-details-table">
+    <tr><th>Administrative Status</th><td id="d-admin">&mdash;</td></tr>
+    <tr><th>Logical Interface</th><td id="d-unit">&mdash;</td></tr>
+    <tr><th>Port Mode</th><td id="d-mode">&mdash;</td></tr>
+    <tr><th>Native VLAN (VLAN ID)</th><td id="d-native">&mdash;</td></tr>
+    <tr><th>IP Address / Subnet Mask</th><td id="d-inet">&mdash;</td></tr>
+    <tr><th>IPv6 Address / Subnet Mask</th><td id="d-inet6">&mdash;</td></tr>
+    <tr><th>MTU (bytes)</th><td id="d-mtu">&mdash;</td></tr>
+    <tr><th>Speed</th><td id="d-speed">Auto-Negotiation</td></tr>
+  </table>
+</div>
+
+{# ── Disable Port hidden form ── #}
+<form id="disable-port-form" method="post" action="{% url 'devices:disable_port' device.pk %}" style="display:none">
+  {% csrf_token %}
+  <input type="hidden" name="interface_name" id="dp-iface">
+  <input type="hidden" name="enable" id="dp-enable" value="false">
+</form>
+
+{# ── Modal: Port Role ── #}
+<div id="port-role-modal" class="vlan-modal-overlay" style="display:none">
+  <div class="vlan-modal-box" style="width:440px">
+    <div class="vlan-modal-header">
+      <span>Edit Port Role</span>
+      <button class="vlan-modal-close" onclick="closeIfaceModal('port_role')">&times;</button>
+    </div>
+    <form method="post" action="{% url 'devices:apply_interface' device.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="interface_name" id="pr-iface">
+      <input type="hidden" name="modal_type" value="link_options">
+      <div class="vlan-tab-content">
+        <p style="margin:0 0 .8rem;color:#555;font-size:.9rem">Edit the roles for the selected ports.</p>
+        <div class="form-grid-2col">
+          <label>Port Role</label>
+          <select name="port_role" style="width:100%">
+            <option value="">None</option>
+            <option value="access-uplink">Access Uplink</option>
+            <option value="server-facing">Server Facing</option>
+            <option value="peer-facing">Peer Facing</option>
+          </select>
+        </div>
+      </div>
+      <div class="vlan-modal-footer">
+        <button type="button" class="button button-secondary" onclick="closeIfaceModal('port_role')">Cancel</button>
+        <button type="submit" class="button">OK</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Modal: VLAN Options ── #}
+<div id="port-vlan-modal" class="vlan-modal-overlay" style="display:none">
+  <div class="vlan-modal-box" style="width:520px">
+    <div class="vlan-modal-header">
+      <span>Edit Vlan Options</span>
+      <button class="vlan-modal-close" onclick="closeIfaceModal('vlan_options')">&times;</button>
+    </div>
+    <form method="post" action="{% url 'devices:apply_interface' device.pk %}" onsubmit="serializeVlanMembers()">
+      {% csrf_token %}
+      <input type="hidden" name="interface_name" id="pv-iface">
+      <input type="hidden" name="modal_type" value="vlan_options">
+      <input type="hidden" name="vlan_members" id="pv-members-hidden">
+      <div class="vlan-tab-content">
+        <div class="form-grid-2col" style="margin-bottom:.8rem">
+          <label>Port Mode</label>
+          <select name="port_mode" id="pv-mode" style="width:100%">
+            <option value="access">Access</option>
+            <option value="trunk">Trunk</option>
+          </select>
+        </div>
+        <div style="font-weight:600;margin-bottom:.4rem;font-size:.92rem">VLAN Members</div>
+        <div class="vlan-ports-layout">
+          <div class="vlan-ports-list-wrap">
+            <table class="vlan-ports-table">
+              <thead><tr><th>VLAN</th></tr></thead>
+              <tbody id="pv-members-tbody"></tbody>
+            </table>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:.4rem">
+            <button type="button" class="vlan-ports-btn" id="pv-add-btn" onclick="showVlanMemberAddRow()">Add&#8230;</button>
+            <button type="button" class="vlan-ports-btn" onclick="removeSelectedVlanMember()">Remove&#8230;</button>
+          </div>
+        </div>
+        <div id="pv-add-row" style="display:none;margin-top:.5rem;display:none">
+          <select id="pv-pick-vlan" style="width:100%;padding:.3rem;border:1px solid #c4d4e0;border-radius:4px;margin-bottom:.4rem">
+            <option value="">— select VLAN —</option>
+          </select>
+          <div style="display:flex;gap:.4rem">
+            <button type="button" class="button" style="flex:1" onclick="commitVlanMemberAdd()">Add</button>
+            <button type="button" class="button button-secondary" style="flex:1" onclick="cancelVlanMemberAdd()">Cancel</button>
+          </div>
+        </div>
+        <div class="form-grid-2col" style="margin-top:.8rem">
+          <label>Native VLAN</label>
+          <select name="native_vlan" id="pv-native" style="width:100%">
+            <option value="">— None —</option>
+          </select>
+        </div>
+      </div>
+      <div class="vlan-modal-footer">
+        <button type="button" class="button button-secondary" onclick="closeIfaceModal('vlan_options')">Cancel</button>
+        <button type="submit" class="button">OK</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Modal: Link Options ── #}
+<div id="port-link-modal" class="vlan-modal-overlay" style="display:none">
+  <div class="vlan-modal-box" style="width:480px">
+    <div class="vlan-modal-header">
+      <span>Edit Link Options</span>
+      <button class="vlan-modal-close" onclick="closeIfaceModal('link_options')">&times;</button>
+    </div>
+    <form method="post" action="{% url 'devices:apply_interface' device.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="interface_name" id="pl-iface">
+      <input type="hidden" name="modal_type" value="link_options">
+      <div class="vlan-tab-content">
+        <div class="form-grid-2col">
+          <label>MTU (bytes)</label>
+          <input type="number" name="mtu" id="pl-mtu" min="256" max="9216" placeholder="1514" style="margin:0">
+          <label>Speed</label>
+          <select name="speed" id="pl-speed" style="width:100%">
+            <option value="">Auto-Negotiation</option>
+            <option value="10m">10 Mbps</option>
+            <option value="100m">100 Mbps</option>
+            <option value="1g">1 Gbps</option>
+            <option value="10g">10 Gbps</option>
+          </select>
+          <label>Duplex</label>
+          <select name="duplex" id="pl-duplex" style="width:100%">
+            <option value="">Automatic</option>
+            <option value="half">Half</option>
+            <option value="full">Full</option>
+          </select>
+          <label>Description</label>
+          <input type="text" name="description" id="pl-desc" maxlength="128" style="margin:0">
+          <label>Enable Flow Control</label>
+          <input type="checkbox" name="flow_control" id="pl-flow" style="margin:0;width:auto">
+        </div>
+      </div>
+      <div class="vlan-modal-footer">
+        <button type="button" class="button button-secondary" onclick="closeIfaceModal('link_options')">Cancel</button>
+        <button type="submit" class="button">OK</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Modal: IP Options ── #}
+<div id="port-ip-modal" class="vlan-modal-overlay" style="display:none">
+  <div class="vlan-modal-box" style="width:480px">
+    <div class="vlan-modal-header">
+      <span>Edit IP Options</span>
+      <button class="vlan-modal-close" onclick="closeIfaceModal('ip_options')">&times;</button>
+    </div>
+    <form method="post" action="{% url 'devices:apply_interface' device.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="interface_name" id="pip-iface">
+      <input type="hidden" name="modal_type" value="ip_options">
+      <div class="vlan-tab-content">
+        <div class="ip-section">
+          <div class="ip-section-header" onclick="toggleIpSection(this)">
+            <span class="ip-section-toggle">&#9660;</span> IPv4
+          </div>
+          <div class="ip-section-body">
+            <div class="form-grid-2col">
+              <label>IP Address / Prefix</label>
+              <input type="text" name="l3_inet" id="pip-inet" placeholder="e.g. 192.168.1.1/24" style="margin:0">
+            </div>
+          </div>
+        </div>
+        <div class="ip-section">
+          <div class="ip-section-header" onclick="toggleIpSection(this)">
+            <span class="ip-section-toggle">&#9658;</span> IPv6
+          </div>
+          <div class="ip-section-body" style="display:none">
+            <div class="form-grid-2col">
+              <label>IPv6 Address / Prefix</label>
+              <input type="text" name="l3_inet6" id="pip-inet6" placeholder="e.g. 2001:db8::1/64" style="margin:0">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="vlan-modal-footer">
+        <button type="button" class="button button-secondary" onclick="closeIfaceModal('ip_options')">Cancel</button>
+        <button type="submit" class="button">OK</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  var selectedIface = null;
+
+  /* ── FPC filter ── */
+  (function buildFpcFilter() {
+    var fpcs = [];
+    IFACE_DATA.forEach(function (d) {
+      var m = d.name.match(/^(?:ge|xe|et|fe)-(\d+)\//);
+      if (m && fpcs.indexOf(m[1]) === -1) fpcs.push(m[1]);
+    });
+    fpcs.sort();
+    var sel = document.getElementById('fpc-filter');
+    fpcs.forEach(function (f) {
+      var o = document.createElement('option');
+      o.value = f; o.textContent = f;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', filterByFpc);
+  })();
+
+  function filterByFpc() {
+    var fpc = document.getElementById('fpc-filter').value;
+    document.querySelectorAll('#iface-tbody .iface-row').forEach(function (row) {
+      row.style.display = (!fpc || row.dataset.fpc === fpc) ? '' : 'none';
+    });
+  }
+
+  /* ── Row selection ── */
+  document.querySelectorAll('#iface-tbody .iface-row').forEach(function (row) {
+    row.addEventListener('click', function () {
+      document.querySelectorAll('#iface-tbody .iface-row').forEach(function (r) { r.classList.remove('selected'); });
+      row.classList.add('selected');
+      selectedIface = row.dataset.name;
+      populateDetails(selectedIface);
+      document.getElementById('port-edit-btn').disabled = false;
+      var d = getIfaceData(selectedIface);
+      var isDisabled = d && d.admin === 'disabled';
+      var btn = document.getElementById('port-disable-btn');
+      btn.disabled = false;
+      btn.textContent = isDisabled ? 'Enable Port' : 'Disable Port';
+    });
+  });
+
+  function getIfaceData(name) {
+    for (var i = 0; i < IFACE_DATA.length; i++) {
+      if (IFACE_DATA[i].name === name) return IFACE_DATA[i];
+    }
+    return null;
+  }
+
+  function populateDetails(name) {
+    var d = getIfaceData(name);
+    if (!d) return;
+    document.getElementById('iface-details').style.display = '';
+    document.getElementById('iface-details-title').textContent = name;
+    document.getElementById('d-admin').textContent = d.admin || '—';
+    document.getElementById('d-unit').textContent = name + '.0';
+    document.getElementById('d-mode').textContent = d.mode || '—';
+    document.getElementById('d-native').textContent = d.native_vlan || '—';
+    document.getElementById('d-inet').textContent = d.inet || '—';
+    document.getElementById('d-inet6').textContent = d.inet6 || '—';
+    document.getElementById('d-mtu').textContent = d.mtu || '—';
+    document.getElementById('d-speed').textContent = 'Auto-Negotiation';
+  }
+
+  /* ── Edit ▾ dropdown ── */
+  window.togglePortEditMenu = function (e) {
+    e.stopPropagation();
+    var menu = document.getElementById('port-edit-menu');
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  };
+  document.addEventListener('click', function () {
+    var menu = document.getElementById('port-edit-menu');
+    if (menu) menu.style.display = 'none';
+  });
+
+  /* ── Modal open/close ── */
+  var MODAL_IDS = {
+    port_role: 'port-role-modal',
+    vlan_options: 'port-vlan-modal',
+    link_options: 'port-link-modal',
+    ip_options: 'port-ip-modal'
+  };
+
+  window.openIfaceModal = function (type) {
+    if (!selectedIface) return;
+    document.getElementById('port-edit-menu').style.display = 'none';
+    var d = getIfaceData(selectedIface);
+    if (!d) return;
+    if (type === 'port_role') {
+      document.getElementById('pr-iface').value = selectedIface;
+
+    } else if (type === 'vlan_options') {
+      document.getElementById('pv-iface').value = selectedIface;
+      document.getElementById('pv-mode').value = d.mode || 'access';
+      /* populate VLAN members listbox */
+      var tbody = document.getElementById('pv-members-tbody');
+      tbody.innerHTML = '';
+      d.vlans.forEach(function (v) { addVlanMemberRow(v); });
+      /* populate native VLAN dropdown */
+      var nSel = document.getElementById('pv-native');
+      nSel.innerHTML = '<option value="">— None —</option>';
+      VLAN_NAMES.forEach(function (v) {
+        var o = document.createElement('option');
+        o.value = v; o.textContent = v;
+        if (v === d.native_vlan) o.selected = true;
+        nSel.appendChild(o);
+      });
+      /* populate VLAN picker */
+      var picker = document.getElementById('pv-pick-vlan');
+      picker.innerHTML = '<option value="">— select VLAN —</option>';
+      VLAN_NAMES.forEach(function (v) {
+        var o = document.createElement('option');
+        o.value = v; o.textContent = v;
+        picker.appendChild(o);
+      });
+
+    } else if (type === 'link_options') {
+      document.getElementById('pl-iface').value = selectedIface;
+      document.getElementById('pl-mtu').value = d.mtu || '';
+      document.getElementById('pl-desc').value = d.description || '';
+      document.getElementById('pl-speed').value = '';
+      document.getElementById('pl-duplex').value = '';
+      document.getElementById('pl-flow').checked = false;
+
+    } else if (type === 'ip_options') {
+      document.getElementById('pip-iface').value = selectedIface;
+      document.getElementById('pip-inet').value = d.inet || '';
+      document.getElementById('pip-inet6').value = d.inet6 || '';
+    }
+
+    var overlay = document.getElementById(MODAL_IDS[type]);
+    if (overlay) overlay.style.display = 'flex';
+  };
+
+  window.closeIfaceModal = function (type) {
+    var overlay = document.getElementById(MODAL_IDS[type]);
+    if (overlay) overlay.style.display = 'none';
+  };
+
+  /* close on overlay click */
+  Object.values(MODAL_IDS).forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('click', function (e) {
+      if (e.target === el) el.style.display = 'none';
+    });
+  });
+
+  /* ── Portal modals to body ── */
+  ['port-role-modal', 'port-vlan-modal', 'port-link-modal', 'port-ip-modal'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) document.body.appendChild(el);
+  });
+
+  /* ── VLAN members listbox helpers ── */
+  function addVlanMemberRow(vlanName) {
+    var tbody = document.getElementById('pv-members-tbody');
+    var tr = document.createElement('tr');
+    tr.className = 'ports-list-row';
+    tr.dataset.vlan = vlanName;
+    tr.innerHTML = '<td>' + vlanName + '</td>';
+    tr.addEventListener('click', function () {
+      document.querySelectorAll('#pv-members-tbody .ports-list-row').forEach(function (r) { r.classList.remove('selected'); });
+      tr.classList.toggle('selected');
+    });
+    tbody.appendChild(tr);
+  }
+
+  window.showVlanMemberAddRow = function () {
+    document.getElementById('pv-add-btn').style.display = 'none';
+    document.getElementById('pv-add-row').style.display = 'block';
+  };
+
+  window.cancelVlanMemberAdd = function () {
+    document.getElementById('pv-add-row').style.display = 'none';
+    document.getElementById('pv-add-btn').style.display = '';
+    document.getElementById('pv-pick-vlan').value = '';
+  };
+
+  window.commitVlanMemberAdd = function () {
+    var v = document.getElementById('pv-pick-vlan').value;
+    if (!v) return;
+    /* avoid duplicate */
+    var existing = [];
+    document.querySelectorAll('#pv-members-tbody .ports-list-row').forEach(function (r) { existing.push(r.dataset.vlan); });
+    if (existing.indexOf(v) === -1) addVlanMemberRow(v);
+    cancelVlanMemberAdd();
+  };
+
+  window.removeSelectedVlanMember = function () {
+    document.querySelectorAll('#pv-members-tbody .ports-list-row.selected').forEach(function (r) { r.remove(); });
+  };
+
+  window.serializeVlanMembers = function () {
+    var vals = [];
+    document.querySelectorAll('#pv-members-tbody .ports-list-row').forEach(function (r) { vals.push(r.dataset.vlan); });
+    document.getElementById('pv-members-hidden').value = vals.join(',');
+  };
+
+  /* ── Disable / Enable port ── */
+  window.submitDisablePort = function () {
+    if (!selectedIface) return;
+    var d = getIfaceData(selectedIface);
+    var isDisabled = d && d.admin === 'disabled';
+    document.getElementById('dp-iface').value = selectedIface;
+    document.getElementById('dp-enable').value = isDisabled ? 'true' : 'false';
+    document.getElementById('disable-port-form').submit();
+  };
+
+  /* ── IP section toggle ── */
+  window.toggleIpSection = function (header) {
+    var body = header.nextElementSibling;
+    var arrow = header.querySelector('.ip-section-toggle');
+    if (body.style.display === 'none') {
+      body.style.display = '';
+      arrow.innerHTML = '&#9660;';
+    } else {
+      body.style.display = 'none';
+      arrow.innerHTML = '&#9658;';
+    }
+  };
+})();
+</script>

@@ -1,0 +1,12 @@
+<div class="section-header"><h2>Services &rsaquo; DHCP</h2></div>
+
+{% if snapshot %}
+{% if snapshot.services.dhcp %}
+<pre class="code-pre">{{ snapshot.services.dhcp }}</pre>
+{% else %}
+<p class="muted">No DHCP configuration found &mdash; run Sync Cache.</p>
+{% endif %}
+<p class="muted" style="margin-top:0.5rem">To modify DHCP configuration, use <a href="?tab=troubleshoot&section=ts_manual_set">CLI Tools</a>.</p>
+{% else %}
+<p class="muted">Run Sync Cache.</p>
+{% endif %}

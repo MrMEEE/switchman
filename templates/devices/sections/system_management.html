@@ -1,0 +1,48 @@
+<div class="section-header"><h2>System &rsaquo; Management Access</h2></div>
+
+{% if snapshot %}
+<div class="jweb-table-wrap">
+  <table class="jweb-table">
+    <thead><tr><th>Service</th><th>Status</th><th>Notes</th></tr></thead>
+    <tbody>
+    <tr>
+      <td>SSH</td>
+      <td>{% if mgmt_services.ssh %}<span class="status-badge badge-ok">Enabled</span>{% else %}<span class="status-badge status-unknown">Not configured</span>{% endif %}</td>
+      <td class="muted">{% if mgmt_services.ssh_root_login %}Root login: {{ mgmt_services.ssh_root_login }}{% endif %}</td>
+    </tr>
+    <tr>
+      <td>NETCONF over SSH</td>
+      <td>{% if mgmt_services.netconf %}<span class="status-badge badge-ok">Enabled</span>{% else %}<span class="status-badge status-unknown">Not configured</span>{% endif %}</td>
+      <td class="muted"></td>
+    </tr>
+    <tr>
+      <td>HTTPS (Web)</td>
+      <td>{% if mgmt_services.https %}<span class="status-badge badge-ok">Enabled</span>{% else %}<span class="status-badge status-unknown">Not configured</span>{% endif %}</td>
+      <td class="muted"></td>
+    </tr>
+    <tr>
+      <td>HTTP (Web)</td>
+      <td>{% if mgmt_services.http %}<span class="status-badge status-warn">Enabled</span>{% else %}<span class="status-badge status-unknown">Not configured</span>{% endif %}</td>
+      <td class="muted">{% if mgmt_services.http %}Consider using HTTPS instead{% endif %}</td>
+    </tr>
+    <tr>
+      <td>Telnet</td>
+      <td>{% if mgmt_services.telnet %}<span class="status-badge status-warn">Enabled</span>{% else %}<span class="status-badge status-unknown">Not configured</span>{% endif %}</td>
+      <td class="muted">{% if mgmt_services.telnet %}Unencrypted &mdash; consider disabling{% endif %}</td>
+    </tr>
+    <tr>
+      <td>FTP</td>
+      <td>{% if mgmt_services.ftp %}<span class="status-badge status-warn">Enabled</span>{% else %}<span class="status-badge status-unknown">Not configured</span>{% endif %}</td>
+      <td class="muted">{% if mgmt_services.ftp %}Unencrypted{% endif %}</td>
+    </tr>
+    </tbody>
+  </table>
+</div>
+{% if snapshot.services.system_services_set %}
+<h4 style="margin-top:1rem">Full Services Config (from cache)</h4>
+<pre class="code-pre">{{ snapshot.services.system_services_set }}</pre>
+{% endif %}
+<p class="muted" style="margin-top:0.5rem">To modify management access, use <a href="?tab=troubleshoot&section=ts_manual_set">CLI Tools</a>.</p>
+{% else %}
+<p class="muted">Run Sync Cache.</p>
+{% endif %}

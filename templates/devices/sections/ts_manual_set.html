@@ -1,0 +1,8 @@
+<h2>Manual Set Commands</h2>
+<div class="panel panel-warn"><p>Edge-case commands not covered by Configure menus. Use with caution &mdash; commands are staged and committed directly.</p></div>
+<form method="post" action="{% url 'devices:manual_set' device.pk %}">{% csrf_token %}
+  {{ manual_set_form.as_p }}
+  <div class="form-actions">
+    <button type="submit" class="button button-danger">Stage / Apply</button>
+  </div>
+</form>

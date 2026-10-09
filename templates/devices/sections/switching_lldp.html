@@ -1,0 +1,55 @@
+<div class="section-header"><h2>Switching &rsaquo; LLDP</h2></div>
+
+{% if snapshot %}
+<div class="info-table-wrap">
+  <table class="info-table">
+    <tr><th>Global LLDP</th><td>
+      {% if lldp_config.all_enabled %}
+        <span class="status-badge badge-ok">Enabled (all interfaces)</span>
+      {% elif lldp_config.enabled_interfaces %}
+        <span class="status-badge status-warn">Enabled (specific interfaces)</span>
+      {% else %}
+        <span class="status-badge status-unknown">Not configured</span>
+      {% endif %}
+    </td></tr>
+  </table>
+</div>
+
+{% if lldp_config.enabled_interfaces %}
+<h4>Explicitly Enabled Interfaces</h4>
+<div class="jweb-table-wrap">
+  <table class="jweb-table">
+    <thead><tr><th>Interface</th></tr></thead>
+    <tbody>
+    {% for iface in lldp_config.enabled_interfaces %}
+    <tr><td>{{ iface }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if lldp_config.disabled_interfaces %}
+<h4>Disabled Interfaces</h4>
+<div class="jweb-table-wrap">
+  <table class="jweb-table">
+    <thead><tr><th>Interface</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for iface in lldp_config.disabled_interfaces %}
+    <tr><td>{{ iface }}</td><td><span class="status-badge status-down">Disabled</span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if snapshot.vlans.lldp %}
+<h4>LLDP Neighbors (from cache)</h4>
+<pre class="code-pre">{{ snapshot.vlans.lldp }}</pre>
+{% endif %}
+
+<p class="muted" style="margin-top:1rem">To change LLDP settings, use <a href="?tab=troubleshoot&section=ts_manual_set">CLI Tools</a>.</p>
+
+{% else %}
+<p class="muted">Run Sync Cache to populate LLDP data.</p>
+{% endif %}

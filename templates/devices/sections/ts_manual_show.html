@@ -1,0 +1,11 @@
+<h2>Manual Show Command</h2>
+<form method="post" action="{% url 'devices:manual_show' device.pk %}">{% csrf_token %}
+  {{ manual_show_form.as_p }}
+  <div class="form-actions">
+    <button type="submit" class="button">Run</button>
+  </div>
+</form>
+{% if last_manual_show %}
+<h4>Output</h4>
+<pre class="code-pre">{{ last_manual_show.output }}</pre>
+{% endif %}

@@ -1,0 +1,4 @@
+<h2>PoE Status</h2>
+{% if snapshot %}
+<pre class="code-pre">{{ snapshot.monitor.poe|default:"No PoE data &mdash; Sync Cache." }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

@@ -1,0 +1,47 @@
+<div class="section-header">
+  <h2>System &rsaquo; NTP Servers</h2>
+  <button class="button button-secondary" onclick="document.getElementById('ntp-panel').style.display='block'">+ Add Server</button>
+</div>
+
+<div class="jweb-table-wrap">
+  <table class="jweb-table">
+    <thead><tr><th>Server IP</th><th>Preferred</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for s in ntp_servers %}
+    <tr>
+      <td>{{ s.ip }}</td>
+      <td>{% if s.prefer %}<span class="status-badge badge-ok">Yes</span>{% else %}&mdash;{% endif %}</td>
+      <td>
+        <form method="post" action="{% url 'devices:delete_ntp' device.pk %}" style="display:inline">
+          {% csrf_token %}
+          <input type="hidden" name="ntp_server" value="{{ s.ip }}">
+          <button type="submit" class="button button-danger btn-sm"
+            onclick="return confirm('Delete NTP server {{ s.ip }}?')">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="3" class="muted">No NTP servers &mdash; Sync Cache or add one.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div id="ntp-panel" class="edit-panel" style="display:none">
+  <h3>Add NTP Server</h3>
+  <form method="post" action="{% url 'devices:apply_ntp' device.pk %}">{% csrf_token %}
+    <div class="form-grid">
+      <div class="form-field">
+        <label>Server IP</label>
+        <input type="text" name="ntp_server" required placeholder="192.168.1.1">
+      </div>
+      <div class="form-field" style="align-self:end">
+        <label><input type="checkbox" name="prefer" value="1"> Mark as preferred</label>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="button">Stage</button>
+      <button type="button" class="button button-secondary" onclick="document.getElementById('ntp-panel').style.display='none'">Cancel</button>
+    </div>
+  </form>
+</div>

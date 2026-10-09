@@ -1,0 +1,4 @@
+<h2>Chassis Information</h2>
+{% if snapshot %}
+<pre class="code-pre">{{ snapshot.monitor.chassis_fpc|default:"No FPC data &mdash; Sync Cache." }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

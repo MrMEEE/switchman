@@ -1,0 +1,12 @@
+<div class="section-header"><h2>Switching &rsaquo; Spanning Tree</h2></div>
+
+{% if snapshot %}
+{% if snapshot.vlans.stp %}
+<pre class="code-pre">{{ snapshot.vlans.stp }}</pre>
+{% else %}
+<p class="muted">No STP data &mdash; run Sync Cache.</p>
+{% endif %}
+<p class="muted" style="margin-top:0.5rem">To modify STP configuration, use <a href="?tab=troubleshoot&section=ts_manual_set">CLI Tools</a>.</p>
+{% else %}
+<p class="muted">Run Sync Cache.</p>
+{% endif %}

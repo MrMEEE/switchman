@@ -1,0 +1,4 @@
+<h2>Interface Status &amp; Traffic</h2>
+{% if snapshot %}
+<pre class="code-pre">{{ snapshot.interfaces.detail|default:"No detail data &mdash; Sync Cache." }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

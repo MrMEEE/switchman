@@ -1,0 +1,16 @@
+<h2>Active Alarms</h2>
+{% if snapshot and snapshot.alarms.parsed %}
+<table class="jweb-table">
+  <thead><tr><th>Time</th><th>Severity</th><th>Description</th></tr></thead>
+  <tbody>
+  {% for alarm in snapshot.alarms.parsed %}
+  <tr>
+    <td>{{ alarm.time }}</td>
+    <td><span class="alarm-pill alarm-{{ alarm.severity|lower }}">{{ alarm.severity }}</span></td>
+    <td>{{ alarm.description }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% elif snapshot %}<p class="status-badge status-up">No active alarms</p>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

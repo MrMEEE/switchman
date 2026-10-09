@@ -1,0 +1,156 @@
+{% load static %}
+<div class="dash-grid">
+  <div class="panel panel-full">
+    <div class="panel-header">
+      <h3>{{ snapshot.system_info.model|default:device.get_platform_display }} &ndash; Port Status</h3>
+      <div class="port-map-actions">
+        {% if snapshot %}<span class="muted">{{ snapshot.synced_at|date:"H:i d M" }}</span>{% endif %}
+        {% if perms.devices.manage_port_layout %}<button type="button" class="button button-secondary btn-sm" id="port-map-edit-btn" onclick="enablePortMapEditor()">Edit Map</button>{% endif %}
+      </div>
+    </div>
+    {% if perms.devices.manage_port_layout %}
+    <div class="port-map-editor-bar" id="port-map-editor-bar" style="display:none">
+      <span class="muted">Drag a port to move it. Drag the corner to resize.</span>
+      <button type="button" class="button button-secondary btn-sm" onclick="detectPortMapLocally()">Local Detect</button>
+      <button type="button" class="button button-secondary btn-sm" onclick="detectPortMapWithGemini()">Gemini Detect</button>
+      {% if perms.devices.manage_gemini_api_key %}<button type="button" class="button button-secondary btn-sm" onclick="openGeminiKeyModal()">Gemini Key</button>{% endif %}
+      <button type="button" class="button btn-sm" onclick="savePortMapLayout()">Save Map</button>
+      <button type="button" class="button button-secondary btn-sm" onclick="resetPortMapLayout()">Reset Defaults</button>
+      <button type="button" class="button button-secondary btn-sm" onclick="disablePortMapEditor()">Done</button>
+    </div>
+    {% endif %}
+    <div class="switch-faceplate" aria-label="{{ device.name }} front panel">
+      <img class="switch-faceplate-img" src="{% static faceplate_display_image %}" alt="{{ faceplate_alt }}" onerror="this.onerror=null;this.src='{% static faceplate_image %}';">
+      <div class="port-diagram">
+        {% for port in visual_ports %}
+        <div class="port port-{{ port.kind }} port-{{ port.link }} {% if port.inverted %}port-inverted{% endif %}" data-port-name="{{ port.name }}" data-default-left="{{ port.default_left }}" data-default-top="{{ port.default_top }}" data-default-width="{{ port.default_width }}" data-default-height="{{ port.default_height }}" title="{{ port.name }} | admin={{ port.admin }} | link={{ port.link }}" style="left:{{ port.left }}%;top:{{ port.top }}%;width:{{ port.width }}%;height:{{ port.height }}%;">
+          <span class="port-label">{{ port.label }}</span>
+          <span class="port-traffic-led traffic-idle" aria-hidden="true"></span>
+          {% if perms.devices.manage_port_layout %}<span class="port-resize-handle" aria-hidden="true"></span>{% endif %}
+        </div>
+        {% empty %}<span class="muted">No port layout available.</span>
+        {% endfor %}
+        {% if perms.devices.manage_port_layout %}<button type="button" class="port-grid-handle" title="Move all port overlays" aria-label="Move all port overlays">Move grid</button>{% endif %}
+      </div>
+    </div>
+    <div class="port-legend">
+      <span><span class="port-dot port-up"></span> Up</span>
+      <span><span class="port-dot port-down"></span> Down</span>
+      <span><span class="port-dot port-disabled"></span> Disabled</span>
+      {% if device.snmp_enabled and perms.devices.view_live_snmp_status %}<span><span class="port-dot traffic-active"></span> SNMP traffic</span>{% endif %}
+    </div>
+  </div>
+
+  {% if snapshot and snapshot.alarms.parsed %}
+  <div class="panel panel-full alarms-bar">
+    <strong>Active Alarms:</strong>
+    {% for alarm in snapshot.alarms.parsed %}
+    <span class="alarm-pill alarm-{{ alarm.severity|lower }}">{{ alarm.severity }}: {{ alarm.description }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h3>System Information</h3>
+    {% if snapshot and snapshot.system_info %}
+    <table class="info-table">
+      <tr><th>System Name</th><td>{{ snapshot.system_info.hostname|default:"&mdash;" }}</td></tr>
+      <tr><th>Device Model</th><td>{{ snapshot.system_info.model|default:"&mdash;" }}</td></tr>
+      <tr><th>Inventory</th><td>{{ snapshot.system_info.inventory|default:"&mdash;" }}</td></tr>
+      <tr><th>JUNOS Image</th><td>{{ snapshot.system_info.junos_version|default:"&mdash;" }}</td></tr>
+      {% if snapshot.system_info.boot_image %}
+      <tr><th>Boot Image</th><td>{{ snapshot.system_info.boot_image|default:"&mdash;" }}</td></tr>
+      {% endif %}
+      <tr><th>Uptime</th><td>{{ snapshot.system_info.uptime|default:"&mdash;" }}</td></tr>
+      {% if snapshot.system_info.last_commit %}
+      <tr><th>Last Configured</th><td>{{ snapshot.system_info.last_commit|default:"&mdash;" }}</td></tr>
+      {% endif %}
+    </table>
+    {% else %}<p class="muted">Run Sync Cache.</p>{% endif %}
+  </div>
+
+  <div class="panel">
+    <h3>Health Status</h3>
+    {% if snapshot and snapshot.health_info %}{% with h=snapshot.health_info %}
+    <div class="health-row">
+      <span class="health-label">Memory</span>
+      <div class="health-bar-wrap"><div class="health-bar {% if h.memory_pct > 85 %}bar-warn{% endif %}" style="width:{{ h.memory_pct|default:0 }}%"></div></div>
+      <span class="health-val">{{ h.memory_pct|default:"?" }}%</span>
+    </div>
+    <div class="health-row">
+      <span class="health-label">CPU Load</span>
+      <div class="health-bar-wrap"><div class="health-bar {% if h.cpu_load > 70 %}bar-warn{% endif %}" style="width:{{ h.cpu_load|default:0 }}%"></div></div>
+      <span class="health-val">{{ h.cpu_load|default:"?" }}%</span>
+    </div>
+    {% if h.temp_c %}
+    <div class="health-row">
+      <span class="health-label">Temperature</span>
+      <div class="health-bar-wrap"><div class="health-bar {% if h.temp_c > 60 %}bar-warn{% endif %}" style="width:{{ h.temp_c }}%"></div></div>
+      <span class="health-val">{{ h.temp_c }}&deg;C</span>
+    </div>
+    {% endif %}
+    <div class="health-row">
+      <span class="health-label">Fans</span>
+      <span class="status-badge {% if h.fan_status == 'OK' %}status-up{% else %}status-down{% endif %}">{{ h.fan_status }}</span>
+    </div>
+    {% endwith %}{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}
+  </div>
+
+  <div class="panel">
+    <h3>Capacity Utilization</h3>
+    {% if capacity %}
+    <table class="info-table">
+      <tr><th>Active Ports</th><td>{{ capacity.active_ports }} / {{ capacity.total_ports }}</td></tr>
+      <tr><th>MAC Table</th><td>{{ capacity.mac_used }} / {{ capacity.mac_supported }}</td></tr>
+      <tr><th>VLANs</th><td>{{ capacity.vlans_configured }} / {{ capacity.vlans_supported }}</td></tr>
+    </table>
+    {% else %}<p class="muted">Run Sync Cache.</p>{% endif %}
+  </div>
+
+  <div class="panel">
+    <h3>Alarms</h3>
+    {% if snapshot and snapshot.alarms.parsed %}
+    <table class="jweb-table">
+      <thead><tr><th>Time</th><th>Severity</th><th>Description</th></tr></thead>
+      <tbody>
+      {% for alarm in snapshot.alarms.parsed %}
+      <tr>
+        <td>{{ alarm.time }}</td>
+        <td><span class="alarm-pill alarm-{{ alarm.severity|lower }}">{{ alarm.severity }}</span></td>
+        <td>{{ alarm.description }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% elif snapshot %}<p class="status-badge status-up">No active alarms</p>
+    {% else %}<p class="muted">Run Sync Cache.</p>{% endif %}
+  </div>
+
+  <div class="panel panel-full">
+    <h3>Recent Fleet Jobs</h3>
+    <table class="jweb-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Device</th>
+          <th>Action</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in recent_jobs %}
+        <tr>
+          <td>{{ job.created_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ job.device.name }}</td>
+          <td>{{ job.action }}</td>
+          <td><span class="job-status {{ job.status }}">{{ job.status }}</span></td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="4">No jobs yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

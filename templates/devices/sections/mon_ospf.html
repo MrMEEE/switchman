@@ -1,0 +1,4 @@
+<h2>OSPF Neighbors</h2>
+{% if snapshot %}
+<pre class="code-pre">{{ snapshot.routing.ospf|default:"No OSPF data &mdash; Sync Cache." }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

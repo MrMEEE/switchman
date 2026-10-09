@@ -1,0 +1,4 @@
+<h2>BGP Summary</h2>
+{% if snapshot %}
+<pre class="code-pre">{{ snapshot.routing.bgp|default:"No BGP data &mdash; Sync Cache." }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

@@ -1,0 +1,22 @@
+<div class="section-header"><h2>System &rsaquo; Date &amp; Time</h2></div>
+
+{% if snapshot %}
+<div class="info-table-wrap">
+  <table class="info-table">
+    <tr><th>Timezone</th><td>{{ system_form.timezone.value|default:"&mdash;" }}</td></tr>
+    {% if snapshot.system_info.uptime %}
+    <tr><th>System Uptime</th><td>{{ snapshot.system_info.uptime }}</td></tr>
+    {% endif %}
+  </table>
+</div>
+{% if snapshot.services.ntp_config %}
+<h4 style="margin-top:1rem">NTP Config (from cache)</h4>
+<pre class="code-pre">{{ snapshot.services.ntp_config }}</pre>
+{% endif %}
+<p class="muted" style="margin-top:0.5rem">
+  Timezone is set in <a href="?tab=configure&section=system_identity">System Identity</a>.
+  NTP servers are managed in <a href="?tab=configure&section=system_ntp">System &rsaquo; NTP</a>.
+</p>
+{% else %}
+<p class="muted">Run Sync Cache.</p>
+{% endif %}

@@ -1,0 +1,4 @@
+<h2>Port Security</h2>
+{% if snapshot %}
+<pre class="code-pre">{{ snapshot.security.port_security|default:"No port security data &mdash; Sync Cache." }}</pre>
+{% else %}<p class="muted">Run Sync Cache.</p>{% endif %}

@@ -1,0 +1,51 @@
+<div class="section-header">
+  <h2>System &rsaquo; SNMP</h2>
+  <button class="button button-secondary" onclick="document.getElementById('snmp-panel').style.display='block'">+ Add Community</button>
+</div>
+
+<div class="jweb-table-wrap">
+  <table class="jweb-table">
+    <thead><tr><th>Community String</th><th>Authorization</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for c in snmp_communities %}
+    <tr>
+      <td><strong>{{ c.community }}</strong></td>
+      <td>{{ c.authorization }}</td>
+      <td>
+        <form method="post" action="{% url 'devices:delete_snmp' device.pk %}" style="display:inline">
+          {% csrf_token %}
+          <input type="hidden" name="community" value="{{ c.community }}">
+          <button type="submit" class="button button-danger btn-sm"
+            onclick="return confirm('Delete SNMP community &quot;{{ c.community }}&quot;?')">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="3" class="muted">No SNMP communities &mdash; Sync Cache or add one.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div id="snmp-panel" class="edit-panel" style="display:none">
+  <h3>Add SNMP Community</h3>
+  <form method="post" action="{% url 'devices:apply_snmp' device.pk %}">{% csrf_token %}
+    <div class="form-grid">
+      <div class="form-field">
+        <label>Community String</label>
+        <input type="text" name="community" required placeholder="public">
+      </div>
+      <div class="form-field">
+        <label>Authorization</label>
+        <select name="authorization">
+          <option value="read-only">Read-only</option>
+          <option value="read-write">Read-write</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="button">Stage</button>
+      <button type="button" class="button button-secondary" onclick="document.getElementById('snmp-panel').style.display='none'">Cancel</button>
+    </div>
+  </form>
+</div>
